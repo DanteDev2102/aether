@@ -10,12 +10,21 @@ import (
 )
 
 type Context struct {
-	ctx  context.Context
-	req  *http.Request
-	res  http.ResponseWriter
-	json JSONEngine
-	xml  XMLEngine
-	Log  Logger
+	ctx      context.Context
+	req      *http.Request
+	res      http.ResponseWriter
+	json     JSONEngine
+	xml      XMLEngine
+	Log      Logger
+	handlers []HandlerFunc
+	index    int
+}
+
+func (c *Context) Next() {
+	c.index++
+	if c.index < len(c.handlers) {
+		c.handlers[c.index](c)
+	}
 }
 
 func (c *Context) JSON(status int, data any) error {

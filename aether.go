@@ -32,10 +32,13 @@ func New(conf *Config) *App {
 	if conf.Logger == nil {
 		conf.Logger = newStdLogger()
 	}
+	router := NewRouter(conf.JSON, conf.XML, conf.Logger)
+	router.Use(LoggerMiddleware())
+
 	return &App{
 		frozen: false,
 		config: conf,
-		router: NewRouter(conf.JSON, conf.XML, conf.Logger),
+		router: router,
 		cron:   newCronManager(conf.Logger),
 	}
 }

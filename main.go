@@ -99,31 +99,25 @@ func pathID(c *Context) (int, bool) {
 	return id, true
 }
 
-// --- Main ---
-
 func main() {
 	app := New(&Config{Host: "localhost", Port: 8080})
 	r := app.Router()
 	store := NewItemStore()
 
-	// CRON JOB de ejemplo: Limpiador de ítems periódicos o sync de datos
-	app.AddCron("daily_cleanup", 15*time.Second, func(ctx context.Context, log Logger) {
+	app.AddCron("daily_cleanup", 2*time.Second, func(ctx context.Context, log Logger) {
 		log.Info("Running scheduled daily cleanup... (mocking background task)")
 	})
 
-	// GET /health
 	Get(r, "/health", func(c *Context) {
 		c.Log.Info("Health check was called")
 		c.res.WriteHeader(200)
 		c.res.Write([]byte("OK"))
 	})
 
-	// GET /items — lista todos los items
 	Get(r, "/items", func(c *Context) {
 		writeJSON(c, http.StatusOK, store.GetAll())
 	})
 
-	// GET /items/{id} — obtiene un item por ID
 	Get(r, "/items/{id}", func(c *Context) {
 		id, ok := pathID(c)
 		if !ok {
@@ -137,7 +131,6 @@ func main() {
 		writeJSON(c, http.StatusOK, item)
 	})
 
-	// POST /items — crea un item
 	Post(r, "/items", func(c *Context, body CreateItemBody) {
 		if body.Name == "" {
 			c.Log.Warn("Attempted to create item without a name")
@@ -149,7 +142,6 @@ func main() {
 		writeJSON(c, http.StatusCreated, item)
 	})
 
-	// PUT /items/{id} — reemplaza un item
 	Put(r, "/items/{id}", func(c *Context, body CreateItemBody) {
 		id, ok := pathID(c)
 		if !ok {
@@ -163,7 +155,6 @@ func main() {
 		writeJSON(c, http.StatusOK, item)
 	})
 
-	// DELETE /items/{id} — elimina un item
 	Delete(r, "/items/{id}", func(c *Context) {
 		id, ok := pathID(c)
 		if !ok {
