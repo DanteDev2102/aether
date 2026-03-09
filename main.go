@@ -100,7 +100,16 @@ func pathID(c *Context) (int, bool) {
 }
 
 func main() {
-	app := New(&Config{Host: "localhost", Port: 8080})
+	customLogger := NewLogger(LogConfig{
+		Stdout:    true,
+		FilePaths: []string{"logs/app.log", "logs/debug/trace.log"},
+	})
+
+	app := New(&Config{
+		Host:   "localhost",
+		Port:   8080,
+		Logger: customLogger,
+	})
 	r := app.Router()
 	store := NewItemStore()
 
