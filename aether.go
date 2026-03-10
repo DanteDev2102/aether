@@ -1,28 +1,36 @@
-package main
+package aether
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
-type Config struct {
-	Port    int
-	Host    string
-	Timeout int
-	JSON    JSONEngine
-	XML     XMLEngine
-	Logger  Logger
+type Config[T any] struct {
+	Port            int
+	Host            string
+	Timeout         int
+	ShutdownTimeout int
+	MaxBodyBytes    int64
+	JSON            JSONEngine
+	XML             XMLEngine
+	Logger          Logger
+	Global          T
+	ErrorHandler    CustomErrorHandler[T]
 }
 
-type App struct {
+type App[T any] struct {
 	frozen bool
-	config *Config
-	router *Router
+	config *Config[T]
+	router *Router[T]
 	cron   *CronManager
 }
 
-func New(conf *Config) *App {
+func New[T any](conf *Config[T]) *App[T] {
 	if conf.JSON == nil {
 		conf.JSON = stdJSONEngine{}
 	}
@@ -32,10 +40,17 @@ func New(conf *Config) *App {
 	if conf.Logger == nil {
 		conf.Logger = newStdLogger()
 	}
-	router := NewRouter(conf.JSON, conf.XML, conf.Logger)
-	router.Use(LoggerMiddleware())
+	if conf.ShutdownTimeout == 0 {
+		conf.ShutdownTimeout = 10
+	}
+	if conf.MaxBodyBytes == 0 {
+		conf.MaxBodyBytes = 2 << 20 
+	}
+	router := NewRouter[T](conf.JSON, conf.XML, conf.Logger, conf.Global, conf.Timeout, conf.MaxBodyBytes)
+	router.Use(RecoveryMiddleware[T](conf.ErrorHandler))
+	router.Use(LoggerMiddleware[T]())
 
-	return &App{
+	return &App[T]{
 		frozen: false,
 		config: conf,
 		router: router,
@@ -43,11 +58,11 @@ func New(conf *Config) *App {
 	}
 }
 
-func (a *App) Router() *Router {
+func (a *App[T]) Router() *Router[T] {
 	return a.router
 }
 
-func (a *App) AddCron(name string, interval time.Duration, job CronJob) {
+func (a *App[T]) AddCron(name string, interval time.Duration, job CronJob) {
 	if a.frozen {
 		a.config.Logger.Error("Cannot add cronjobs after Aether is listening")
 		return
@@ -55,7 +70,7 @@ func (a *App) AddCron(name string, interval time.Duration, job CronJob) {
 	a.cron.Add(name, interval, job)
 }
 
-func (a *App) Listen() error {
+func (a *App[T]) Listen() error {
 	a.frozen = true
 
 	a.cron.Start()
@@ -64,5 +79,39 @@ func (a *App) Listen() error {
 
 	a.config.Logger.Infof("Aether is up and flying! %s", addr)
 
-	return http.ListenAndServe(addr, a.router)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: a.router,
+	}
+	
+	if a.config.Timeout > 0 {
+		t := time.Duration(a.config.Timeout) * time.Second
+		srv.ReadTimeout = t
+		srv.WriteTimeout = t
+		srv.IdleTimeout = t * 2
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			a.config.Logger.Fatalf("Aether core listener failed: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	a.config.Logger.Warn("Aether is gently shutting down... Waiting for connections to finish.")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.config.ShutdownTimeout)*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		a.config.Logger.Errorf("Aether forced to violently shutdown: %v", err)
+	}
+
+	a.config.Logger.Info("Aether has successfully shutdown. See you soon!")
+	a.config.Logger.Sync() 
+
+	return nil
 }

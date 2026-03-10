@@ -1,4 +1,4 @@
-package main
+package aether
 
 import (
 	"encoding/xml"

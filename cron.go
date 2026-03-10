@@ -1,8 +1,9 @@
-package main
+package aether
 
 import (
 	"context"
 	"time"
+	"sync"
 )
 
 type CronJob func(ctx context.Context, log Logger)
@@ -18,6 +19,7 @@ type CronManager struct {
 	log     Logger
 	ctx     context.Context
 	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 func newCronManager(log Logger) *CronManager {
@@ -27,6 +29,7 @@ func newCronManager(log Logger) *CronManager {
 		log:     log,
 		ctx:     ctx,
 		cancel:  cancel,
+		wg: 	 sync.WaitGroup{}
 	}
 }
 
@@ -47,13 +50,19 @@ func (c *CronManager) Start() {
 	c.log.Infof("Starting %d cron jobs...", len(c.entries))
 	
 	for _, entry := range c.entries {
-		go c.runJob(entry)
+		c.wg.Add(1)
+		go func(e cronEntry) {
+			defer c.wg.Done()
+			c.runJob(e)
+		}(entry)
 	}
 }
 
 func (c *CronManager) Stop() {
 	c.log.Info("Stopping all cron jobs...")
 	c.cancel()
+	c.wg.Wait()
+	c.log.Info("All cron jobs stopped gracefully.")
 }
 
 func (c *CronManager) runJob(entry cronEntry) {
