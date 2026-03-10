@@ -75,14 +75,21 @@ func (c *CronManager) runJob(entry cronEntry) {
 		entry.job(c.ctx, c.log)
 	}
 
-	ticker := time.NewTicker(entry.interval)
-	defer ticker.Stop()
+	execute()
 
 	for {
+		timer := time.NewTimer(entry.interval)
+		
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			execute()
 		case <-c.ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			c.log.Infof("Cron job stopped: %s", entry.name)
 			return
 		}
