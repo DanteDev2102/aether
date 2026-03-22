@@ -4,228 +4,194 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strconv"
-	"sync"
 	"time"
-	"github.com/DanteDev2102/aether"
+
+	"github.com/DantDev2102/aether"
+	"github.com/DantDev2102/aether/middlewares"
 )
 
-type Item struct {
-	ID   int    `json:"id"`
+type AppState struct {
+	Version string
+	StartAt time.Time
+}
+
+type CreateUserBody struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type UpdateUserBody struct {
 	Name string `json:"name"`
-	Qty  int    `json:"qty"`
-}
-
-type CreateItemBody struct {
-	Name string `json:"name"`
-	Qty  int    `json:"qty"`
-}
-
-type ItemStore struct {
-	mu      sync.RWMutex
-	items   map[int]Item
-	counter int
-}
-
-func NewItemStore() *ItemStore {
-	return &ItemStore{items: make(map[int]Item)}
-}
-
-func (s *ItemStore) GetAll() []Item {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	list := make([]Item, 0, len(s.items))
-	for _, item := range s.items {
-		list = append(list, item)
-	}
-	return list
-}
-
-func (s *ItemStore) GetByID(id int) (Item, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	item, ok := s.items[id]
-	return item, ok
-}
-
-func (s *ItemStore) Create(name string, qty int) Item {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.counter++
-	item := Item{ID: s.counter, Name: name, Qty: qty}
-	s.items[s.counter] = item
-	return item
-}
-
-func (s *ItemStore) Update(id int, name string, qty int) (Item, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.items[id]; !ok {
-		return Item{}, false
-	}
-	item := Item{ID: id, Name: name, Qty: qty}
-	s.items[id] = item
-	return item, true
-}
-
-func (s *ItemStore) Delete(id int) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.items[id]; !ok {
-		return false
-	}
-	delete(s.items, id)
-	return true
-}
-
-type GlobalState struct {
-	Store *ItemStore
-}
-
-func writeJSON[T any](c *Context[T], status int, data any) {
-	c.JSON(status, data)
-}
-
-func writeError[T any](c *Context[T], status int, msg string) {
-	writeJSON(c, status, map[string]string{"error": msg})
-}
-
-func pathID[T any](c *Context[T]) (int, bool) {
-	id, err := strconv.Atoi(c.req.PathValue("id"))
-	if err != nil || id <= 0 {
-		writeError(c, http.StatusBadRequest, "id inválido")
-		return 0, false
-	}
-	return id, true
-}
-
-type SessionData struct {
-	UserID string
-	Role   string
 }
 
 func main() {
-	customLogger := aether.NewLogger(LogConfig{
-		Stdout:    true,
-		FilePaths: []string{"logs/app.log", "logs/debug/trace.log"},
-	})
+	// Inicializar otter cache
+	cache, err := aether.NewOtterStore(10000)
+	if err != nil {
+		panic(err)
+	}
 
-	store := NewItemStore()
-
-	app := aether.New[GlobalState](&Config[GlobalState]{
-		Host:    "localhost",
+	app := aether.New(&aether.Config[AppState]{
 		Port:    8080,
-		Logger:  customLogger,
-		Global:  GlobalState{Store: store},
-		Timeout: 1,
-		ErrorHandler: func(c *Context[GlobalState], err any) {
-			c.Log.Error("Enviando Notificacion a Discord/Slack por culpa del Panic!")
-			c.JSON(http.StatusInternalServerError, map[string]any{
-				"status": "fatal",
-				"msg":    "Nuestros ingenieros han sido notificados",
-				"reason": err,
-			})
+		Timeout: 30,
+		Cache:   cache,
+		Logger: aether.NewLogger(aether.LogConfig{
+			Stdout: true,
+		}),
+		Global: AppState{
+			Version: "1.0.0",
+			StartAt: time.Now(),
 		},
 	})
+
 	r := app.Router()
 
-	aether.Static(r, "/assets", "./public")
+	// ─── Global Middlewares ───────────────────────────────────────────
+	r.Use(middlewares.CORSMiddleware[AppState](middlewares.CORSConfig{
+		AllowOrigins:     []string{"*"},
+		AllowCredentials: true,
+	}))
+	r.Use(middlewares.HelmetMiddleware[AppState](middlewares.DefaultHelmetConfig()))
+	r.Use(middlewares.RequestIDMiddleware[AppState]())
 
-	app.AddCron("daily_cleanup", 2*time.Second, func(ctx context.Context, log Logger) {
-		log.Info("Running scheduled daily cleanup... (mocking background task)")
-	})
-
-	aether.Get(r, "/health", func(c *Context[GlobalState]) {
-		c.Log.Info("Health check was called")
-		c.res.WriteHeader(200)
-		c.res.Write([]byte("OK"))
-	})
-
-	aether.Get(r, "/panic", func(c *Context[GlobalState]) {
-		c.Log.Info("Atencion: forzando un panic para probar el RecoveryMiddleware!")
-		var ptr *int
-		_ = *ptr
-	})
-
-	aether.Get(r, "/items", func(c *Context[GlobalState]) {
-		writeJSON(c, http.StatusOK, c.Global.Store.GetAll())
-	})
-
-	aether.Get(r, "/items/{id}", func(c *Context[GlobalState]) {
-		id, ok := pathID(c)
-		if !ok {
-			return
-		}
-		item, found := c.Global.Store.GetByID(id)
-		if !found {
-			writeError(c, http.StatusNotFound, "item no encontrado")
-			return
-		}
-		writeJSON(c, http.StatusOK, item)
-	})
-
-	aether.Post(r, "/items", func(c *Context[GlobalState], body CreateItemBody) {
-		if body.Name == "" {
-			c.Log.Warn("Attempted to create item without a name")
-			writeError(c, http.StatusBadRequest, "el campo 'name' es requerido")
-			return
-		}
-		item := c.Global.Store.Create(body.Name, body.Qty)
-		c.Log.Infof("Item created id=%d name=%s", item.ID, item.Name)
-		writeJSON(c, http.StatusCreated, item)
-	})
-
-	aether.Put(r, "/items/{id}", func(c *Context[GlobalState], body CreateItemBody) {
-		id, ok := pathID(c)
-		if !ok {
-			return
-		}
-		item, found := c.Global.Store.Update(id, body.Name, body.Qty)
-		if !found {
-			writeError(c, http.StatusNotFound, "item no encontrado")
-			return
-		}
-		writeJSON(c, http.StatusOK, item)
-	})
-
-	aether.Delete(r, "/items/{id}", func(c *Context[GlobalState]) {
-		id, ok := pathID(c)
-		if !ok {
-			return
-		}
-		if !c.Global.Store.Delete(id) {
-			writeError(c, http.StatusNotFound, "item no encontrado")
-			return
-		}
-		c.Log.Infof("Item deleted id=%d", id)
-		c.res.WriteHeader(http.StatusNoContent)
-	})
-
-	profileGroup := aether.NewGroup("/session", r)
-
-	profileGroup.Use(func(c *Context[GlobalState]) {
-		c.Log.Info("Autenticando usuario...")
-		ctx := context.WithValue(c.ctx, "user_id", "12345-abcde")
-		ctx = context.WithValue(ctx, "role", "admin")
-		c.ctx = ctx
-		c.Next()
-	})
-
-	aether.Get(profileGroup, "/profile", WithCustomContext(SessionData{}, func(c *CustomContext[GlobalState, SessionData]) {
-		if uid, ok := c.ctx.Value("user_id").(string); ok {
-			c.Data.UserID = uid
-		}
-		if role, ok := c.ctx.Value("role").(string); ok {
-			c.Data.Role = role
-		}
-
-		c.Log.Infof("Bienvenido al perfil, %s (%s)", c.Data.UserID, c.Data.Role)
+	// ─── Public Routes ───────────────────────────────────────────────
+	aether.Get(r, "/", func(c *aether.Context[AppState]) {
 		c.JSON(http.StatusOK, map[string]any{
-			"message": "Perfil cargado con CustomContext seguro",
-			"session": c.Data,
-			"global":  fmt.Sprintf("Tengo %d items guardados globales", len(c.Global.Store.GetAll())),
+			"message": "Welcome to Aether!",
+			"version": c.Global.Version,
+			"uptime":  time.Since(c.Global.StartAt).String(),
 		})
+	})
+
+	aether.Get(r, "/health", func(c *aether.Context[AppState]) {
+		c.JSON(http.StatusOK, map[string]string{"status": "healthy"})
+	})
+
+	// ─── API Group ───────────────────────────────────────────────────
+	api := aether.NewGroup("/api/v1", r)
+
+	// Rate limit the API
+	api.Use(middlewares.RateLimiterMiddleware[AppState](middlewares.RateLimiterConfig{
+		Limit:  60,
+		Window: time.Minute,
 	}))
 
+	// Users CRUD
+	aether.Get(api, "/users", func(c *aether.Context[AppState]) {
+		c.JSON(http.StatusOK, []map[string]any{
+			{"id": 1, "name": "Alice", "email": "alice@example.com"},
+			{"id": 2, "name": "Bob", "email": "bob@example.com"},
+		})
+	})
+
+	aether.Get(api, "/users/{id}", func(c *aether.Context[AppState]) {
+		id := c.Param("id")
+		c.JSON(http.StatusOK, map[string]string{
+			"id":   id,
+			"name": "Alice",
+		})
+	})
+
+	aether.Post[AppState, CreateUserBody](api, "/users", func(c *aether.Context[AppState], body CreateUserBody) {
+		c.JSON(http.StatusCreated, map[string]any{
+			"id":    3,
+			"name":  body.Name,
+			"email": body.Email,
+		})
+	})
+
+	aether.Put[AppState, UpdateUserBody](api, "/users/{id}", func(c *aether.Context[AppState], body UpdateUserBody) {
+		c.JSON(http.StatusOK, map[string]any{
+			"id":   c.Param("id"),
+			"name": body.Name,
+		})
+	})
+
+	aether.Delete(api, "/users/{id}", func(c *aether.Context[AppState]) {
+		c.JSON(http.StatusOK, map[string]string{
+			"message": fmt.Sprintf("User %s deleted", c.Param("id")),
+		})
+	})
+
+	// ─── Cache Example ───────────────────────────────────────────────
+	aether.Get(api, "/cached", func(c *aether.Context[AppState]) {
+		ctx := c.Req().Context()
+		val, ok := c.Cache().Get(ctx, "expensive_data")
+		if ok {
+			c.JSON(http.StatusOK, map[string]any{
+				"source": "cache",
+				"data":   val,
+			})
+			return
+		}
+
+		data := map[string]string{"result": "computed value"}
+		c.Cache().Set(ctx, "expensive_data", data)
+
+		c.JSON(http.StatusOK, map[string]any{
+			"source": "computed",
+			"data":   data,
+		})
+	})
+
+	// ─── Cookie Example ──────────────────────────────────────────────
+	aether.Get(r, "/set-cookie", func(c *aether.Context[AppState]) {
+		c.SetCookie(&http.Cookie{
+			Name:     "theme",
+			Value:    "dark",
+			Path:     "/",
+			MaxAge:   86400,
+			HttpOnly: true,
+		})
+		c.JSON(http.StatusOK, map[string]string{"message": "Cookie set!"})
+	})
+
+	aether.Get(r, "/get-cookie", func(c *aether.Context[AppState]) {
+		cookie, err := c.Cookie("theme")
+		if err != nil {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "Cookie not found"})
+			return
+		}
+		c.JSON(http.StatusOK, map[string]string{"theme": cookie.Value})
+	})
+
+	// ─── Protected Routes (JWT) ──────────────────────────────────────
+	protected := aether.NewGroup("/admin", r)
+	protected.Use(middlewares.JWTMiddleware[AppState](middlewares.JWTConfig{
+		Secret: []byte("my-super-secret-key"),
+	}))
+
+	aether.Get(protected, "/dashboard", func(c *aether.Context[AppState]) {
+		claims := middlewares.GetMapClaims(c)
+		c.JSON(http.StatusOK, map[string]any{
+			"message": "Welcome to admin dashboard",
+			"claims":  claims,
+		})
+	})
+
+	// ─── SSE Example ─────────────────────────────────────────────────
+	aether.Get(r, "/events", func(c *aether.Context[AppState]) {
+		rc, err := c.SSE()
+		if err != nil {
+			c.Log().Errorf("SSE error: %v", err)
+			return
+		}
+
+		for i := 0; i < 5; i++ {
+			fmt.Fprintf(c.Res(), "data: Event %d at %s\n\n", i, time.Now().Format(time.RFC3339))
+			rc.Flush()
+			time.Sleep(1 * time.Second)
+		}
+	})
+
+	// ─── Static Files ────────────────────────────────────────────────
+	aether.Static(r, "/static/", "./public")
+
+	// ─── Cron Jobs ───────────────────────────────────────────────────
+	app.AddCron("health-check", 30*time.Second, func(ctx context.Context, log aether.Logger) {
+		log.Info("Health check: everything is fine ✓")
+	})
+
+	// ─── Start Server ────────────────────────────────────────────────
 	app.Listen()
 }

@@ -70,12 +70,12 @@ func RateLimiterMiddleware[T any](cfg RateLimiterConfig) aether.HandlerFunc[T] {
 	}
 
 	return func(c *aether.Context[T]) {
-		if cfg.SkipFunc != nil && cfg.SkipFunc(c.Req) {
+		if cfg.SkipFunc != nil && cfg.SkipFunc(c.Req()) {
 			c.Next()
 			return
 		}
 
-		key := c.Req.RemoteAddr
+		key := c.Req().RemoteAddr
 		if idx := strings.LastIndex(key, ":"); idx != -1 {
 			key = key[:idx]
 		}
@@ -90,7 +90,7 @@ func RateLimiterMiddleware[T any](cfg RateLimiterConfig) aether.HandlerFunc[T] {
 			}
 
 			if fromTrusted {
-				if xff := c.Req.Header.Get("X-Forwarded-For"); xff != "" {
+				if xff := c.Req().Header.Get("X-Forwarded-For"); xff != "" {
 					parts := strings.Split(xff, ",")
 					key = strings.TrimSpace(parts[0])
 				}
@@ -99,22 +99,21 @@ func RateLimiterMiddleware[T any](cfg RateLimiterConfig) aether.HandlerFunc[T] {
 
 		count, err := cfg.Store.Increment(key, cfg.Window)
 		if err != nil {
-			c.Log.Errorf("RateLimiter error guardando registro: %v", err)
+			c.Log().Errorf("RateLimiter error: %v", err)
 			c.Next()
 			return
 		}
 
 		if count > cfg.Limit {
-			c.Res.WriteHeader(http.StatusTooManyRequests)
 			c.JSON(http.StatusTooManyRequests, map[string]any{
 				"error":   "Too Many Requests",
-				"message": fmt.Sprintf("Rate limit de %d excedido. Calmate por favor.", cfg.Limit),
+				"message": fmt.Sprintf("Rate limit of %d exceeded.", cfg.Limit),
 			})
 			return
 		}
 
-		c.Res.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", cfg.Limit))
-		c.Res.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", cfg.Limit-count))
+		c.Res().Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", cfg.Limit))
+		c.Res().Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", cfg.Limit-count))
 
 		c.Next()
 	}

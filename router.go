@@ -13,6 +13,8 @@ type Router[T any] struct {
 	prefix       string
 	json         JSONEngine
 	xml          XMLEngine
+	template     TemplateEngine
+	cache        CacheStore
 	log          Logger
 	middlewares  []HandlerFunc[T]
 	ctxPool      sync.Pool
@@ -38,6 +40,8 @@ func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
 		prefix:       router.prefix + prefix,
 		json:         router.json,
 		xml:          router.xml,
+		template:     router.template,
+		cache:        router.cache,
 		log:          router.log,
 		middlewares:  m,
 		ctxPool:      router.ctxPool,
@@ -47,12 +51,14 @@ func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
 	}
 }
 
-func NewRouter[T any](jsonEngine JSONEngine, xmlEngine XMLEngine, log Logger, global T, timeout int, maxBodyBytes int64) *Router[T] {
+func NewRouter[T any](jsonEngine JSONEngine, xmlEngine XMLEngine, templateEngine TemplateEngine, cacheStore CacheStore, log Logger, global T, timeout int, maxBodyBytes int64) *Router[T] {
 	return &Router[T]{
 		mux:         http.NewServeMux(),
 		prefix:      "",
 		json:        jsonEngine,
 		xml:         xmlEngine,
+		template:    templateEngine,
+		cache:       cacheStore,
 		log:         log,
 		middlewares: make([]HandlerFunc[T], 0),
 		ctxPool: sync.Pool{
@@ -85,7 +91,7 @@ func registerHelper[T any](r *Router[T], method, path string, finalHandler Handl
 		}
 
 		c := r.ctxPool.Get().(*Context[T])
-		c.Reset(w, req, chain, r.json, r.xml, r.log, r.global)
+		c.Reset(w, req, chain, r.json, r.xml, r.template, r.cache, r.log, r.global)
 
 		c.Next()
 

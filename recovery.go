@@ -1,15 +1,15 @@
-package middlewares
+package aether
 
 import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
-
-	"github.com/DantDev2102/aether"
 )
 
-func ExternalRecoveryMiddleware[T any](customHandler func(c *aether.Context[T], err any)) aether.HandlerFunc[T] {
-	return func(c *aether.Context[T]) {
+type CustomErrorHandler[T any] func(c *Context[T], err any)
+
+func RecoveryMiddleware[T any](customHandler CustomErrorHandler[T]) HandlerFunc[T] {
+	return func(c *Context[T]) {
 		defer func() {
 			if err := recover(); err != nil {
 				stack := string(debug.Stack())

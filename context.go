@@ -1,11 +1,13 @@
 package aether
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +22,7 @@ type ResponseWriter interface {
 	http.ResponseWriter
 	Status() int
 	Size() int
+	Unwrap() http.ResponseWriter
 }
 
 type responseWriter struct {
@@ -55,26 +58,34 @@ func (rw *responseWriter) Size() int {
 	return rw.size
 }
 
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 type Context[T any] struct {
 	ctx      context.Context
 	req      *http.Request
 	res      ResponseWriter
 	json     JSONEngine
 	xml      XMLEngine
-	Log      Logger
+	template TemplateEngine
+	cache    CacheStore
+	log      Logger
 	handlers []HandlerFunc[T]
 	index    int
 	start    time.Time
 	Global   T
 }
 
-func (c *Context[T]) Reset(w http.ResponseWriter, req *http.Request, handlers []HandlerFunc[T], json JSONEngine, xml XMLEngine, log Logger, global T) {
+func (c *Context[T]) Reset(w http.ResponseWriter, req *http.Request, handlers []HandlerFunc[T], json JSONEngine, xml XMLEngine, template TemplateEngine, cache CacheStore, log Logger, global T) {
 	c.ctx = req.Context()
 	c.req = req
 	c.res = &responseWriter{ResponseWriter: w}
 	c.json = json
 	c.xml = xml
-	c.Log = log
+	c.template = template
+	c.cache = cache
+	c.log = log
 	c.handlers = handlers
 	c.index = -1
 	c.start = time.Now()
@@ -82,6 +93,30 @@ func (c *Context[T]) Reset(w http.ResponseWriter, req *http.Request, handlers []
 }
 
 
+
+func (c *Context[T]) Req() *http.Request {
+	return c.req
+}
+
+func (c *Context[T]) SetReq(req *http.Request) {
+	c.req = req
+}
+
+func (c *Context[T]) Res() http.ResponseWriter {
+	return c.res
+}
+
+func (c *Context[T]) Log() Logger {
+	return c.log
+}
+
+func (c *Context[T]) Start() time.Time {
+	return c.start
+}
+
+func (c *Context[T]) Cache() CacheStore {
+	return c.cache
+}
 
 func (c *Context[T]) Param(key string) string {
 	return c.req.PathValue(key)
@@ -149,6 +184,58 @@ func (c *Context[T]) String(status int, text string, args ...any) error {
 	c.res.WriteHeader(status)
 	_, err := fmt.Fprintf(c.res, text, args...)
 	return err
+}
+
+func (c *Context[T]) Render(status int, name string, data any) error {
+	if c.template == nil {
+		return fmt.Errorf("Aether: Template Engine is not configured")
+	}
+	c.res.Header().Set("Content-Type", "text/html; charset=utf-8")
+	c.res.WriteHeader(status)
+	return c.template.Render(c.res, name, data)
+}
+
+func (c *Context[T]) SetCookie(cookie *http.Cookie) {
+	http.SetCookie(c.res, cookie)
+}
+
+func (c *Context[T]) Cookie(name string) (*http.Cookie, error) {
+	return c.req.Cookie(name)
+}
+
+func (c *Context[T]) ClearCookie(name string) {
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Now().Add(-100 * time.Hour),
+		HttpOnly: true,
+	}
+	http.SetCookie(c.res, cookie)
+}
+
+func (c *Context[T]) File(filepath string) {
+	http.ServeFile(c.res, c.req, filepath)
+}
+
+func (c *Context[T]) Attachment(filepath, filename string) {
+	c.res.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	http.ServeFile(c.res, c.req, filepath)
+}
+
+func (c *Context[T]) SSE() (*http.ResponseController, error) {
+	c.res.Header().Set("Content-Type", "text/event-stream")
+	c.res.Header().Set("Cache-Control", "no-cache")
+	c.res.Header().Set("Connection", "keep-alive")
+	rc := http.NewResponseController(c.res)
+	err := rc.Flush()
+	return rc, err
+}
+
+func (c *Context[T]) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	rc := http.NewResponseController(c.res)
+	return rc.Hijack()
 }
 
 type formField struct {
@@ -279,3 +366,16 @@ func WithCustomContext[T any, L any](initialData L, handler func(c *CustomContex
 		handler(custom)
 	}
 }
+
+// WrapMiddleware adapts a standard net/http middleware into an Aether HandlerFunc.
+func WrapMiddleware[T any](mw func(http.Handler) http.Handler) HandlerFunc[T] {
+	return func(c *Context[T]) {
+		nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c.SetReq(r)
+			c.Next()
+		})
+		
+		mw(nextHandler).ServeHTTP(c.Res(), c.Req())
+	}
+}
+

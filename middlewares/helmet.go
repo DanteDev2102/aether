@@ -28,7 +28,7 @@ func DefaultHelmetConfig() HelmetConfig {
 
 func HelmetMiddleware[T any](cfg HelmetConfig) aether.HandlerFunc[T] {
 	return func(c *aether.Context[T]) {
-		h := c.Res.Header()
+		h := c.Res().Header()
 
 		if cfg.XSSProtection != "" {
 			h.Set("X-XSS-Protection", cfg.XSSProtection)

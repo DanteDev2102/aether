@@ -3,12 +3,17 @@ package aether
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
+
+type TemplateEngine interface {
+	Render(w io.Writer, name string, data any) error
+}
 
 type Config[T any] struct {
 	Port            int
@@ -18,6 +23,8 @@ type Config[T any] struct {
 	MaxBodyBytes    int64
 	JSON            JSONEngine
 	XML             XMLEngine
+	Template        TemplateEngine
+	Cache           CacheStore
 	Logger          Logger
 	Global          T
 	ErrorHandler    CustomErrorHandler[T]
@@ -46,9 +53,8 @@ func New[T any](conf *Config[T]) *App[T] {
 	if conf.MaxBodyBytes == 0 {
 		conf.MaxBodyBytes = 2 << 20 
 	}
-	router := NewRouter[T](conf.JSON, conf.XML, conf.Logger, conf.Global, conf.Timeout, conf.MaxBodyBytes)
+	router := NewRouter[T](conf.JSON, conf.XML, conf.Template, conf.Cache, conf.Logger, conf.Global, conf.Timeout, conf.MaxBodyBytes)
 	router.Use(RecoveryMiddleware[T](conf.ErrorHandler))
-	router.Use(LoggerMiddleware[T]())
 
 	return &App[T]{
 		frozen: false,
@@ -109,6 +115,8 @@ func (a *App[T]) Listen() error {
 	if err := srv.Shutdown(ctx); err != nil {
 		a.config.Logger.Errorf("Aether forced to violently shutdown: %v", err)
 	}
+
+	a.cron.Stop()
 
 	a.config.Logger.Info("Aether has successfully shutdown. See you soon!")
 	a.config.Logger.Sync() 

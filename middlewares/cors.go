@@ -41,7 +41,7 @@ func CORSMiddleware[T any](cfg CORSConfig) aether.HandlerFunc[T] {
 	maxAge := fmt.Sprintf("%d", cfg.MaxAge)
 
 	return func(c *aether.Context[T]) {
-		h := c.Res.Header()
+		h := c.Res().Header()
 
 		h.Set("Access-Control-Allow-Origin", allowOrigins)
 		h.Set("Access-Control-Allow-Methods", allowMethods)
@@ -57,8 +57,8 @@ func CORSMiddleware[T any](cfg CORSConfig) aether.HandlerFunc[T] {
 			h.Set("Access-Control-Max-Age", maxAge)
 		}
 
-		if c.Req.Method == http.MethodOptions {
-			c.Res.WriteHeader(http.StatusNoContent)
+		if c.Req().Method == http.MethodOptions {
+			c.Res().WriteHeader(http.StatusNoContent)
 			return
 		}
 

@@ -29,7 +29,7 @@ func newCronManager(log Logger) *CronManager {
 		log:     log,
 		ctx:     ctx,
 		cancel:  cancel,
-		wg: 	 sync.WaitGroup{}
+		wg: 	 sync.WaitGroup{},
 	}
 }
 
