@@ -2,10 +2,11 @@ package aether
 
 import (
 	"context"
-	"time"
 	"sync"
+	"time"
 )
 
+// CronJob is the function signature for cron job tasks.
 type CronJob func(ctx context.Context, log Logger)
 
 type cronEntry struct {
@@ -14,6 +15,7 @@ type cronEntry struct {
 	name     string
 }
 
+// CronManager manages scheduled cron jobs.
 type CronManager struct {
 	entries []cronEntry
 	log     Logger
@@ -29,10 +31,11 @@ func newCronManager(log Logger) *CronManager {
 		log:     log,
 		ctx:     ctx,
 		cancel:  cancel,
-		wg: 	 sync.WaitGroup{},
+		wg:      sync.WaitGroup{},
 	}
 }
 
+// Add registers a new cron job with the specified name and interval.
 func (c *CronManager) Add(name string, interval time.Duration, job CronJob) {
 	c.entries = append(c.entries, cronEntry{
 		interval: interval,
@@ -42,13 +45,14 @@ func (c *CronManager) Add(name string, interval time.Duration, job CronJob) {
 	c.log.Infof("Cron job registered: %s (interval: %v)", name, interval)
 }
 
+// Start begins execution of all registered cron jobs.
 func (c *CronManager) Start() {
 	if len(c.entries) == 0 {
 		return
 	}
-	
+
 	c.log.Infof("Starting %d cron jobs...", len(c.entries))
-	
+
 	for _, entry := range c.entries {
 		c.wg.Add(1)
 		go func(e cronEntry) {
@@ -58,6 +62,7 @@ func (c *CronManager) Start() {
 	}
 }
 
+// Stop gracefully stops all running cron jobs.
 func (c *CronManager) Stop() {
 	c.log.Info("Stopping all cron jobs...")
 	c.cancel()
@@ -79,7 +84,7 @@ func (c *CronManager) runJob(entry cronEntry) {
 
 	for {
 		timer := time.NewTimer(entry.interval)
-		
+
 		select {
 		case <-timer.C:
 			execute()

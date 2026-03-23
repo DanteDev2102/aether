@@ -9,8 +9,8 @@ import (
 )
 
 type gzipResponseWriter struct {
-	aether.ResponseWriter 
-	gw             *gzip.Writer
+	aether.ResponseWriter
+	gw *gzip.Writer
 }
 
 func (g *gzipResponseWriter) Write(b []byte) (int, error) {
@@ -20,6 +20,7 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 	return g.gw.Write(b)
 }
 
+// GzipMiddleware compresses responses using gzip encoding.
 func GzipMiddleware[T any]() aether.HandlerFunc[T] {
 	return func(c *aether.Context[T]) {
 		if !strings.Contains(c.Req().Header.Get("Accept-Encoding"), "gzip") || strings.Contains(c.Req().Header.Get("Connection"), "Upgrade") {
@@ -31,7 +32,7 @@ func GzipMiddleware[T any]() aether.HandlerFunc[T] {
 		c.Res().Header().Add("Vary", "Accept-Encoding")
 
 		gz := gzip.NewWriter(c.Res())
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 
 		// Note: Gzip wrapping requires direct response writer replacement.
 		// This middleware works at the http.ResponseWriter level.

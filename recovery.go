@@ -6,8 +6,10 @@ import (
 	"runtime/debug"
 )
 
+// CustomErrorHandler defines the function signature for custom error handling.
 type CustomErrorHandler[T any] func(c *Context[T], err any)
 
+// RecoveryMiddleware recovers from panics and logs the error stack trace.
 func RecoveryMiddleware[T any](customHandler CustomErrorHandler[T]) HandlerFunc[T] {
 	return func(c *Context[T]) {
 		defer func() {
@@ -18,7 +20,7 @@ func RecoveryMiddleware[T any](customHandler CustomErrorHandler[T]) HandlerFunc[
 				if customHandler != nil {
 					customHandler(c, err)
 				} else {
-					c.JSON(http.StatusInternalServerError, map[string]string{
+					_ = c.JSON(http.StatusInternalServerError, map[string]string{
 						"error": "Internal Server Error",
 						"panic": fmt.Sprintf("%v", err),
 					})

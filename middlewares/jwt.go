@@ -11,8 +11,10 @@ import (
 
 type contextKey string
 
+// ClaimsContextKey is the context key for storing JWT claims.
 const ClaimsContextKey contextKey = "aether_jwt_claims"
 
+// JWTValidator defines the interface for JWT token validation.
 type JWTValidator interface {
 	Validate(tokenString string) (jwt.Claims, error)
 }
@@ -23,6 +25,7 @@ type defaultJWTValidator struct {
 	claimsFunc    func() jwt.Claims
 }
 
+// Validate checks and validates a JWT token string.
 func (v *defaultJWTValidator) Validate(tokenString string) (jwt.Claims, error) {
 	claims := v.claimsFunc()
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
@@ -37,6 +40,7 @@ func (v *defaultJWTValidator) Validate(tokenString string) (jwt.Claims, error) {
 	return token.Claims, nil
 }
 
+// JWTConfig holds configuration for JWT authentication middleware.
 type JWTConfig struct {
 	Secret        []byte
 	SigningMethod jwt.SigningMethod
@@ -71,6 +75,7 @@ func extractToken(req *http.Request, lookup string) string {
 	return ""
 }
 
+// JWTMiddleware provides JWT token validation and authentication.
 func JWTMiddleware[T any](cfg JWTConfig) aether.HandlerFunc[T] {
 	validator := cfg.Validator
 	if validator == nil {
@@ -100,7 +105,7 @@ func JWTMiddleware[T any](cfg JWTConfig) aether.HandlerFunc[T] {
 			if cfg.ErrorHandler != nil {
 				cfg.ErrorHandler(&aether.Context[any]{}, jwt.ErrTokenMalformed)
 			} else {
-				c.JSON(http.StatusUnauthorized, map[string]string{
+				_ = c.JSON(http.StatusUnauthorized, map[string]string{
 					"error": "Missing or invalid token",
 				})
 			}
@@ -112,7 +117,7 @@ func JWTMiddleware[T any](cfg JWTConfig) aether.HandlerFunc[T] {
 			if cfg.ErrorHandler != nil {
 				cfg.ErrorHandler(&aether.Context[any]{}, err)
 			} else {
-				c.JSON(http.StatusUnauthorized, map[string]string{
+				_ = c.JSON(http.StatusUnauthorized, map[string]string{
 					"error": "Invalid or expired token",
 				})
 			}
@@ -126,11 +131,13 @@ func JWTMiddleware[T any](cfg JWTConfig) aether.HandlerFunc[T] {
 	}
 }
 
+// GetClaims retrieves JWT claims from the request context.
 func GetClaims[T any](c *aether.Context[T]) jwt.Claims {
 	claims, _ := c.Req().Context().Value(ClaimsContextKey).(jwt.Claims)
 	return claims
 }
 
+// GetMapClaims retrieves JWT claims as a MapClaims from the request context.
 func GetMapClaims[T any](c *aether.Context[T]) jwt.MapClaims {
 	claims, _ := c.Req().Context().Value(ClaimsContextKey).(jwt.MapClaims)
 	return claims

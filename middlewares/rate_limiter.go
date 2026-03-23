@@ -10,24 +10,29 @@ import (
 	"github.com/DantDev2102/aether"
 )
 
+// RateLimiterStore defines the interface for rate limiting storage.
 type RateLimiterStore interface {
 	Increment(key string, window time.Duration) (int, error)
 }
 
+// MemStoreItem represents a rate limiter entry with count and expiration.
 type MemStoreItem struct {
 	mu        sync.Mutex
 	Count     int
 	ExpiresAt time.Time
 }
 
+// MemoryRateLimiterStore is an in-memory implementation of RateLimiterStore.
 type MemoryRateLimiterStore struct {
 	m sync.Map
 }
 
+// NewMemoryRateLimiterStore creates a new in-memory rate limiter store.
 func NewMemoryRateLimiterStore() *MemoryRateLimiterStore {
 	return &MemoryRateLimiterStore{}
 }
 
+// Increment increases the counter for the given key within the time window.
 func (s *MemoryRateLimiterStore) Increment(key string, window time.Duration) (int, error) {
 	now := time.Now()
 
@@ -50,6 +55,7 @@ func (s *MemoryRateLimiterStore) Increment(key string, window time.Duration) (in
 	return item.Count, nil
 }
 
+// RateLimiterConfig holds configuration for the rate limiter middleware.
 type RateLimiterConfig struct {
 	Limit        int
 	Window       time.Duration
@@ -58,6 +64,7 @@ type RateLimiterConfig struct {
 	TrustProxies []string
 }
 
+// RateLimiterMiddleware limits request rate based on configuration.
 func RateLimiterMiddleware[T any](cfg RateLimiterConfig) aether.HandlerFunc[T] {
 	if cfg.Store == nil {
 		cfg.Store = NewMemoryRateLimiterStore()
@@ -105,7 +112,7 @@ func RateLimiterMiddleware[T any](cfg RateLimiterConfig) aether.HandlerFunc[T] {
 		}
 
 		if count > cfg.Limit {
-			c.JSON(http.StatusTooManyRequests, map[string]any{
+			_ = c.JSON(http.StatusTooManyRequests, map[string]any{
 				"error":   "Too Many Requests",
 				"message": fmt.Sprintf("Rate limit of %d exceeded.", cfg.Limit),
 			})

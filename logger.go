@@ -14,6 +14,7 @@ import (
 	"time"
 )
 
+// Logger defines the interface for logging operations.
 type Logger interface {
 	Debug(args ...any)
 	Debugf(format string, args ...any)
@@ -48,6 +49,7 @@ type prettyHandler struct {
 	dropped          *atomic.Uint64
 }
 
+// LogConfig holds configuration options for the logger.
 type LogConfig struct {
 	Stdout    bool
 	FilePaths []string
@@ -62,50 +64,61 @@ var bufPool = sync.Pool{
 	},
 }
 
+// Debug logs a debug level message.
 func (l stdLogger) Debug(args ...any) {
 	l.l.Debug(fmt.Sprint(args...))
 }
 
+// Debugf logs a formatted debug level message.
 func (l stdLogger) Debugf(format string, args ...any) {
 	l.l.Debug(fmt.Sprintf(format, args...))
 }
 
+// Info logs an info level message.
 func (l stdLogger) Info(args ...any) {
 	l.l.Info(fmt.Sprint(args...))
 }
 
+// Infof logs a formatted info level message.
 func (l stdLogger) Infof(format string, args ...any) {
 	l.l.Info(fmt.Sprintf(format, args...))
 }
 
+// Warn logs a warning level message.
 func (l stdLogger) Warn(args ...any) {
 	l.l.Warn(fmt.Sprint(args...))
 }
 
+// Warnf logs a formatted warning level message.
 func (l stdLogger) Warnf(format string, args ...any) {
 	l.l.Warn(fmt.Sprintf(format, args...))
 }
 
+// Error logs an error level message.
 func (l stdLogger) Error(args ...any) {
 	l.l.Error(fmt.Sprint(args...))
 }
 
+// Errorf logs a formatted error level message.
 func (l stdLogger) Errorf(format string, args ...any) {
 	l.l.Error(fmt.Sprintf(format, args...))
 }
 
+// Fatal logs a fatal level message and exits the program.
 func (l stdLogger) Fatal(args ...any) {
 	l.l.Error(fmt.Sprint(args...))
 	l.Sync()
 	os.Exit(1)
 }
 
+// Fatalf logs a formatted fatal level message and exits the program.
 func (l stdLogger) Fatalf(format string, args ...any) {
 	l.l.Error(fmt.Sprintf(format, args...))
 	l.Sync()
 	os.Exit(1)
 }
 
+// Panic logs a panic level message and panics.
 func (l stdLogger) Panic(args ...any) {
 	msg := fmt.Sprint(args...)
 	l.l.Error(msg)
@@ -113,6 +126,7 @@ func (l stdLogger) Panic(args ...any) {
 	panic(msg)
 }
 
+// Panicf logs a formatted panic level message and panics.
 func (l stdLogger) Panicf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	l.l.Error(msg)
@@ -120,16 +134,19 @@ func (l stdLogger) Panicf(format string, args ...any) {
 	panic(msg)
 }
 
+// Sync flushes any buffered log entries.
 func (l stdLogger) Sync() {
 	if l.sync != nil {
 		l.sync()
 	}
 }
 
+// Enabled reports whether the handler handles the given level.
 func (h *prettyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return level >= h.opts.Level.Level()
 }
 
+// Handle formats and writes the log record.
 func (h *prettyHandler) Handle(ctx context.Context, r slog.Record) error {
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
@@ -172,6 +189,7 @@ func (h *prettyHandler) Handle(ctx context.Context, r slog.Record) error {
 	return nil
 }
 
+// WithAttrs returns a new handler with the provided attributes.
 func (h *prettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	h2 := *h
 
@@ -211,6 +229,7 @@ func appendAttr(buf *bytes.Buffer, groups []string, a slog.Attr) {
 	buf.WriteString(a.Value.String())
 }
 
+// WithGroup returns a new handler with the provided group name.
 func (h *prettyHandler) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return h
@@ -220,6 +239,7 @@ func (h *prettyHandler) WithGroup(name string) slog.Handler {
 	return &h2
 }
 
+// Sync flushes the handler's buffer.
 func (h *prettyHandler) Sync() {
 	syncChan := make(chan struct{})
 	h.ch <- logMessage{sync: syncChan}
@@ -237,32 +257,33 @@ func startWorker(ch <-chan logMessage, out io.Writer, dropped *atomic.Uint64) {
 			select {
 			case msg, ok := <-ch:
 				if !ok {
-					bw.Flush()
+					_ = bw.Flush()
 					return
 				}
 				if msg.buf != nil {
 					if d := dropped.Swap(0); d > 0 {
 						dropMsg := fmt.Sprintf("%s [WARN] [INTERNAL] Dropped %d messages due to buffer overflow\n", time.Now().Format("2006-01-02 15:04:05"), d)
-						bw.WriteString(dropMsg)
+						_, _ = bw.WriteString(dropMsg)
 					}
-					bw.Write(msg.buf.Bytes())
+					_, _ = bw.Write(msg.buf.Bytes())
 					bufPool.Put(msg.buf)
 				}
 				if msg.sync != nil {
-					bw.Flush()
+					_ = bw.Flush()
 					close(msg.sync)
 				}
 			case <-ticker.C:
 				if d := dropped.Swap(0); d > 0 {
 					dropMsg := fmt.Sprintf("%s [WARN] [INTERNAL] Dropped %d messages due to buffer overflow\n", time.Now().Format("2006-01-02 15:04:05"), d)
-					bw.WriteString(dropMsg)
+					_, _ = bw.WriteString(dropMsg)
 				}
-				bw.Flush()
+				_ = bw.Flush()
 			}
 		}
 	}()
 }
 
+// NewLogger creates a new Logger instance with the given configuration.
 func NewLogger(cfg LogConfig) Logger {
 	var writers []io.Writer
 
@@ -275,9 +296,9 @@ func NewLogger(cfg LogConfig) Logger {
 			continue
 		}
 		if dir := filepath.Dir(p); dir != "." && dir != "" {
-			os.MkdirAll(dir, 0755)
+			_ = os.MkdirAll(dir, 0o750)
 		}
-		logFile, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		logFile, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err == nil {
 			writers = append(writers, logFile)
 		} else {

@@ -2,6 +2,7 @@ package aether
 
 import "context"
 
+// CacheStore defines the interface for caching operations.
 type CacheStore interface {
 	Get(ctx context.Context, key string) (any, bool)
 	Set(ctx context.Context, key string, value any) error

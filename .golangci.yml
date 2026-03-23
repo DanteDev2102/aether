@@ -1,0 +1,73 @@
+version: "2"
+
+run:
+  go: "1.25"
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - gocyclo
+    - gosec
+    - ineffassign
+    - misspell
+    - noctx
+    - revive
+    - staticcheck
+    - unconvert
+  settings:
+    gocyclo:
+      min-complexity: 15
+    gosec:
+      excludes:
+        - G104
+        - G304
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+          disabled: false
+        - name: var-naming
+          arguments:
+            - - ID
+              - UID
+              - UUID
+              - URL
+              - API
+              - HTTP
+          disabled: false
+        - name: package-comments
+          disabled: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/DanteDev2102/aether)
+      custom-order: true
+    gofumpt:
+      extra-rules: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

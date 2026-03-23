@@ -8,6 +8,7 @@ import (
 	"github.com/DantDev2102/aether"
 )
 
+// ExternalRecoveryMiddleware recovers from panics with custom error handling.
 func ExternalRecoveryMiddleware[T any](customHandler func(c *aether.Context[T], err any)) aether.HandlerFunc[T] {
 	return func(c *aether.Context[T]) {
 		defer func() {
@@ -18,7 +19,7 @@ func ExternalRecoveryMiddleware[T any](customHandler func(c *aether.Context[T], 
 				if customHandler != nil {
 					customHandler(c, err)
 				} else {
-					c.JSON(http.StatusInternalServerError, map[string]string{
+					_ = c.JSON(http.StatusInternalServerError, map[string]string{
 						"error": "Internal Server Error",
 						"panic": fmt.Sprintf("%v", err),
 					})

@@ -8,6 +8,7 @@ import (
 	"github.com/DantDev2102/aether"
 )
 
+// CORSConfig holds configuration for Cross-Origin Resource Sharing middleware.
 type CORSConfig struct {
 	AllowOrigins     []string
 	AllowMethods     []string
@@ -17,6 +18,7 @@ type CORSConfig struct {
 	MaxAge           int
 }
 
+// CORSMiddleware handles Cross-Origin Resource Sharing headers.
 func CORSMiddleware[T any](cfg CORSConfig) aether.HandlerFunc[T] {
 	allowOrigins := "*"
 	if len(cfg.AllowOrigins) > 0 {

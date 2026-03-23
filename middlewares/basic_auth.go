@@ -8,12 +8,14 @@ import (
 	"github.com/DantDev2102/aether"
 )
 
+// BasicAuthConfig holds configuration for Basic Authentication middleware.
 type BasicAuthConfig struct {
 	Users    map[string]string
 	Validate func(user, password string) bool
 	Realm    string
 }
 
+// BasicAuthMiddleware provides HTTP Basic Authentication.
 func BasicAuthMiddleware[T any](cfg BasicAuthConfig) aether.HandlerFunc[T] {
 	realm := cfg.Realm
 	if realm == "" {
@@ -24,7 +26,7 @@ func BasicAuthMiddleware[T any](cfg BasicAuthConfig) aether.HandlerFunc[T] {
 		user, pass, ok := c.Req().BasicAuth()
 		if !ok {
 			c.Res().Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-			c.JSON(http.StatusUnauthorized, map[string]string{
+			_ = c.JSON(http.StatusUnauthorized, map[string]string{
 				"error": "Unauthorized",
 			})
 			return
@@ -46,7 +48,7 @@ func BasicAuthMiddleware[T any](cfg BasicAuthConfig) aether.HandlerFunc[T] {
 
 		if !valid {
 			c.Res().Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-			c.JSON(http.StatusUnauthorized, map[string]string{
+			_ = c.JSON(http.StatusUnauthorized, map[string]string{
 				"error": "Invalid credentials",
 			})
 			return

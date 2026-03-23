@@ -1,0 +1,67 @@
+version: "3"
+
+vars:
+  MODULE: github.com/DantDev2102/aether
+  COVERAGE_DIR: coverage
+
+tasks:
+  default:
+    desc: "Default task: Runs tests"
+    cmds:
+      - task: test
+
+  setup:
+    desc: "Installs dependencies and sets up environment"
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  build:
+    desc: "Builds all packages"
+    cmds:
+      - go build ./...
+    sources:
+      - "**/*.go"
+      - "go.mod"
+
+  test:
+    desc: "Runs all tests with race detection"
+    cmds:
+      - go test -race -v ./...
+    sources:
+      - "**/*.go"
+
+  test-coverage:
+    desc: "Runs tests and generates coverage report"
+    cmds:
+      - mkdir -p {{.COVERAGE_DIR}}
+      - go test -race -coverprofile={{.COVERAGE_DIR}}/coverage.out -covermode=atomic ./...
+      - go tool cover -html={{.COVERAGE_DIR}}/coverage.out -o {{.COVERAGE_DIR}}/coverage.html
+    dir: "{{.USER_WORKING_DIR}}"
+
+  lint:
+    desc: "Runs linter"
+    cmds:
+      - golangci-lint run ./...
+
+  security:
+    desc: "Checks for vulnerabilities in dependencies"
+    cmds:
+      - govulncheck ./...
+
+  bench:
+    desc: "Runs benchmarks"
+    cmds:
+      - go test -bench=. -benchmem ./...
+
+  example:
+    desc: "Runs the example server"
+    dir: example
+    cmds:
+      - go run .
+
+  clean:
+    desc: "Removes build artifacts and coverage reports"
+    cmds:
+      - rm -rf bin/
+      - rm -rf coverage/

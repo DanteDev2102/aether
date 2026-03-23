@@ -2,6 +2,7 @@ package aether
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,7 @@ type testGlobal struct {
 
 func newTestApp() *App[testGlobal] {
 	return New[testGlobal](&Config[testGlobal]{
-		Port: 0,
+		Port:   0,
 		Global: testGlobal{AppName: "TestApp"},
 	})
 }
@@ -24,10 +25,10 @@ func TestGetRoute(t *testing.T) {
 	r := app.Router()
 
 	Get(r, "/hello", func(c *Context[testGlobal]) {
-		c.String(http.StatusOK, "Hello, World!")
+		_ = c.String(http.StatusOK, "Hello, World!")
 	})
 
-	req := httptest.NewRequest("GET", "/hello", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/hello", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -49,11 +50,11 @@ func TestPostRoute(t *testing.T) {
 	r := app.Router()
 
 	Post[testGlobal, reqBody](r, "/users", func(c *Context[testGlobal], body reqBody) {
-		c.JSON(http.StatusCreated, map[string]string{"name": body.Name})
+		_ = c.JSON(http.StatusCreated, map[string]string{"name": body.Name})
 	})
 
 	payload := `{"name":"Aether"}`
-	req := httptest.NewRequest("POST", "/users", bytes.NewBufferString(payload))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/users", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -64,7 +65,7 @@ func TestPostRoute(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["name"] != "Aether" {
 		t.Errorf("expected name 'Aether', got '%s'", resp["name"])
 	}
@@ -75,10 +76,10 @@ func TestContextJSON(t *testing.T) {
 	r := app.Router()
 
 	Get(r, "/json", func(c *Context[testGlobal]) {
-		c.JSON(http.StatusOK, map[string]string{"key": "value"})
+		_ = c.JSON(http.StatusOK, map[string]string{"key": "value"})
 	})
 
-	req := httptest.NewRequest("GET", "/json", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/json", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -88,7 +89,7 @@ func TestContextJSON(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["key"] != "value" {
 		t.Errorf("expected key 'value', got '%s'", resp["key"])
 	}
@@ -99,10 +100,10 @@ func TestContextString(t *testing.T) {
 	r := app.Router()
 
 	Get(r, "/text", func(c *Context[testGlobal]) {
-		c.String(http.StatusOK, "Hello %s", "Aether")
+		_ = c.String(http.StatusOK, "Hello %s", "Aether")
 	})
 
-	req := httptest.NewRequest("GET", "/text", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/text", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -121,10 +122,10 @@ func TestQueryParam(t *testing.T) {
 
 	Get(r, "/search", func(c *Context[testGlobal]) {
 		q := c.Query("q")
-		c.String(http.StatusOK, "search: %s", q)
+		_ = c.String(http.StatusOK, "search: %s", q)
 	})
 
-	req := httptest.NewRequest("GET", "/search?q=aether", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/search?q=aether", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -140,10 +141,10 @@ func TestPathParam(t *testing.T) {
 
 	Get(r, "/users/{id}", func(c *Context[testGlobal]) {
 		id := c.Param("id")
-		c.String(http.StatusOK, "user: %s", id)
+		_ = c.String(http.StatusOK, "user: %s", id)
 	})
 
-	req := httptest.NewRequest("GET", "/users/42", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/users/42", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -163,10 +164,10 @@ func TestMiddleware(t *testing.T) {
 	})
 
 	Get(r, "/mw", func(c *Context[testGlobal]) {
-		c.String(http.StatusOK, "ok")
+		_ = c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest("GET", "/mw", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/mw", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -182,10 +183,10 @@ func TestGroupRoutes(t *testing.T) {
 
 	api := NewGroup("/api", r)
 	Get(api, "/status", func(c *Context[testGlobal]) {
-		c.String(http.StatusOK, "api ok")
+		_ = c.String(http.StatusOK, "api ok")
 	})
 
-	req := httptest.NewRequest("GET", "/api/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/status", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -203,10 +204,10 @@ func TestGlobalAccess(t *testing.T) {
 	r := app.Router()
 
 	Get(r, "/global", func(c *Context[testGlobal]) {
-		c.String(http.StatusOK, "%s", c.Global.AppName)
+		_ = c.String(http.StatusOK, "%s", c.Global.AppName)
 	})
 
-	req := httptest.NewRequest("GET", "/global", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/global", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -226,20 +227,20 @@ func TestCookies(t *testing.T) {
 			Value: "abc123",
 			Path:  "/",
 		})
-		c.String(http.StatusOK, "cookie set")
+		_ = c.String(http.StatusOK, "cookie set")
 	})
 
 	Get(r, "/get-cookie", func(c *Context[testGlobal]) {
 		cookie, err := c.Cookie("session")
 		if err != nil {
-			c.String(http.StatusBadRequest, "no cookie")
+			_ = c.String(http.StatusBadRequest, "no cookie")
 			return
 		}
-		c.String(http.StatusOK, "%s", cookie.Value)
+		_ = c.String(http.StatusOK, "%s", cookie.Value)
 	})
 
 	// Test set cookie
-	req := httptest.NewRequest("GET", "/set-cookie", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/set-cookie", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -252,7 +253,7 @@ func TestCookies(t *testing.T) {
 	}
 
 	// Test get cookie
-	req2 := httptest.NewRequest("GET", "/get-cookie", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), "GET", "/get-cookie", nil)
 	req2.AddCookie(&http.Cookie{Name: "session", Value: "abc123"})
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
@@ -269,11 +270,11 @@ func TestRenderWithoutTemplate(t *testing.T) {
 	Get(r, "/render", func(c *Context[testGlobal]) {
 		err := c.Render(http.StatusOK, "index", nil)
 		if err != nil {
-			c.String(http.StatusInternalServerError, "%s", err.Error())
+			_ = c.String(http.StatusInternalServerError, "%s", err.Error())
 		}
 	})
 
-	req := httptest.NewRequest("GET", "/render", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/render", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -291,14 +292,14 @@ func TestPutRoute(t *testing.T) {
 	r := app.Router()
 
 	Put[testGlobal, updateBody](r, "/users/{id}", func(c *Context[testGlobal], body updateBody) {
-		c.JSON(http.StatusOK, map[string]string{
+		_ = c.JSON(http.StatusOK, map[string]string{
 			"id":   c.Param("id"),
 			"name": body.Name,
 		})
 	})
 
 	payload := `{"name":"Updated"}`
-	req := httptest.NewRequest("PUT", "/users/1", bytes.NewBufferString(payload))
+	req := httptest.NewRequestWithContext(context.Background(), "PUT", "/users/1", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -308,7 +309,7 @@ func TestPutRoute(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["id"] != "1" || resp["name"] != "Updated" {
 		t.Errorf("unexpected response: %v", resp)
 	}
@@ -319,10 +320,10 @@ func TestDeleteRoute(t *testing.T) {
 	r := app.Router()
 
 	Delete(r, "/users/{id}", func(c *Context[testGlobal]) {
-		c.JSON(http.StatusOK, map[string]string{"deleted": c.Param("id")})
+		_ = c.JSON(http.StatusOK, map[string]string{"deleted": c.Param("id")})
 	})
 
-	req := httptest.NewRequest("DELETE", "/users/99", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "DELETE", "/users/99", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -331,7 +332,7 @@ func TestDeleteRoute(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["deleted"] != "99" {
 		t.Errorf("expected deleted '99', got '%s'", resp["deleted"])
 	}
@@ -345,7 +346,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 		panic("test panic")
 	})
 
-	req := httptest.NewRequest("GET", "/panic", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/panic", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -362,8 +363,8 @@ func TestCacheAccessor(t *testing.T) {
 	}
 
 	app := New[testGlobal](&Config[testGlobal]{
-		Port:  0,
-		Cache: store,
+		Port:   0,
+		Cache:  store,
 		Global: testGlobal{AppName: "CacheTest"},
 	})
 	r := app.Router()
@@ -371,23 +372,23 @@ func TestCacheAccessor(t *testing.T) {
 	Get(r, "/cache-set", func(c *Context[testGlobal]) {
 		err := c.Cache().Set(c.Req().Context(), "key1", "value1")
 		if err != nil {
-			c.String(http.StatusInternalServerError, "cache error")
+			_ = c.String(http.StatusInternalServerError, "cache error")
 			return
 		}
-		c.String(http.StatusOK, "cached")
+		_ = c.String(http.StatusOK, "cached")
 	})
 
 	Get(r, "/cache-get", func(c *Context[testGlobal]) {
 		val, ok := c.Cache().Get(c.Req().Context(), "key1")
 		if !ok {
-			c.String(http.StatusNotFound, "not found")
+			_ = c.String(http.StatusNotFound, "not found")
 			return
 		}
-		c.String(http.StatusOK, "%s", val.(string))
+		_ = c.String(http.StatusOK, "%s", val.(string))
 	})
 
 	// Set cache
-	req := httptest.NewRequest("GET", "/cache-set", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/cache-set", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -396,7 +397,7 @@ func TestCacheAccessor(t *testing.T) {
 	}
 
 	// Get cache
-	req2 := httptest.NewRequest("GET", "/cache-get", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), "GET", "/cache-get", nil)
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 
@@ -419,10 +420,10 @@ func TestWrapMiddleware(t *testing.T) {
 	r.Use(WrapMiddleware[testGlobal](stdMiddleware))
 
 	Get(r, "/wrapped", func(c *Context[testGlobal]) {
-		c.String(http.StatusOK, "ok")
+		_ = c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest("GET", "/wrapped", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/wrapped", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

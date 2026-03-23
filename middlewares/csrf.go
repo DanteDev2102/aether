@@ -8,6 +8,7 @@ import (
 	"github.com/DantDev2102/aether"
 )
 
+// CSRFConfig holds configuration for CSRF protection middleware.
 type CSRFConfig struct {
 	TokenLength int
 	CookieName  string
@@ -27,6 +28,7 @@ func generateToken(length int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// CSRFMiddleware provides CSRF token generation and validation.
 func CSRFMiddleware[T any](cfg CSRFConfig) aether.HandlerFunc[T] {
 	if cfg.TokenLength == 0 {
 		cfg.TokenLength = 32
@@ -63,7 +65,7 @@ func CSRFMiddleware[T any](cfg CSRFConfig) aether.HandlerFunc[T] {
 		if err != nil || cookie.Value == "" {
 			token, err = generateToken(cfg.TokenLength)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, map[string]string{
+				_ = c.JSON(http.StatusInternalServerError, map[string]string{
 					"error": "Failed to generate CSRF token",
 				})
 				return
@@ -93,7 +95,7 @@ func CSRFMiddleware[T any](cfg CSRFConfig) aether.HandlerFunc[T] {
 		}
 
 		if clientToken == "" || clientToken != token {
-			c.JSON(http.StatusForbidden, map[string]string{
+			_ = c.JSON(http.StatusForbidden, map[string]string{
 				"error": "Invalid CSRF token",
 			})
 			return

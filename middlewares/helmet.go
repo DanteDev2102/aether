@@ -2,10 +2,11 @@ package middlewares
 
 import (
 	"fmt"
-	
+
 	"github.com/DantDev2102/aether"
 )
 
+// HelmetConfig holds configuration for security headers middleware.
 type HelmetConfig struct {
 	XSSProtection         string
 	ContentTypeNosniff    string
@@ -16,6 +17,7 @@ type HelmetConfig struct {
 	ReferrerPolicy        string
 }
 
+// DefaultHelmetConfig returns the default security headers configuration.
 func DefaultHelmetConfig() HelmetConfig {
 	return HelmetConfig{
 		XSSProtection:         "1; mode=block",
@@ -26,6 +28,7 @@ func DefaultHelmetConfig() HelmetConfig {
 	}
 }
 
+// HelmetMiddleware adds security HTTP headers to responses.
 func HelmetMiddleware[T any](cfg HelmetConfig) aether.HandlerFunc[T] {
 	return func(c *aether.Context[T]) {
 		h := c.Res().Header()

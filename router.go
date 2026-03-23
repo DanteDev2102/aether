@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Router handles HTTP routing and middleware registration.
 type Router[T any] struct {
 	mux          *http.ServeMux
 	prefix       string
@@ -23,6 +24,7 @@ type Router[T any] struct {
 	maxBodyBytes int64
 }
 
+// Use registers one or more middleware handlers.
 func (r *Router[T]) Use(middlewares ...HandlerFunc[T]) {
 	r.middlewares = append(r.middlewares, middlewares...)
 }
@@ -31,6 +33,7 @@ func (r *Router[T]) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
 
+// NewGroup creates a new router group with the specified prefix.
 func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
 	m := make([]HandlerFunc[T], len(router.middlewares))
 	copy(m, router.middlewares)
@@ -44,13 +47,14 @@ func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
 		cache:        router.cache,
 		log:          router.log,
 		middlewares:  m,
-		ctxPool:      router.ctxPool,
+		ctxPool:      sync.Pool{},
 		global:       router.global,
 		timeout:      router.timeout,
 		maxBodyBytes: router.maxBodyBytes,
 	}
 }
 
+// NewRouter creates a new Router instance with the given configuration.
 func NewRouter[T any](jsonEngine JSONEngine, xmlEngine XMLEngine, templateEngine TemplateEngine, cacheStore CacheStore, log Logger, global T, timeout int, maxBodyBytes int64) *Router[T] {
 	return &Router[T]{
 		mux:         http.NewServeMux(),
@@ -99,64 +103,74 @@ func registerHelper[T any](r *Router[T], method, path string, finalHandler Handl
 	})
 }
 
+// Get registers a handler for GET requests at the specified path.
 func Get[T any](r *Router[T], path string, h HandlerFunc[T]) {
 	registerHelper(r, "GET", path, h)
 }
 
+// Delete registers a handler for DELETE requests at the specified path.
 func Delete[T any](r *Router[T], path string, h HandlerFunc[T]) {
 	registerHelper(r, "DELETE", path, h)
 }
 
-func Post[T any, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
+// Post registers a handler for POST requests at the specified path.
+func Post[T, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
 	registerHelper(r, "POST", path, func(c *Context[T]) {
 		var body B
 		if err := c.Bind(&body); err != nil {
-			http.Error(c.res, "Aether: Invalid Request Body", http.StatusBadRequest)
+			http.Error(c.Res(), "Aether: Invalid Request Body", http.StatusBadRequest)
 			return
 		}
 		h(c, body)
 	})
 }
 
-func Put[T any, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
+// Put registers a handler for PUT requests at the specified path.
+func Put[T, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
 	registerHelper(r, "PUT", path, func(c *Context[T]) {
 		var body B
 		if err := c.Bind(&body); err != nil {
-			http.Error(c.res, "Aether: Invalid Request Body", http.StatusBadRequest)
+			http.Error(c.Res(), "Aether: Invalid Request Body", http.StatusBadRequest)
 			return
 		}
 		h(c, body)
 	})
 }
 
-func Patch[T any, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
+// Patch registers a handler for PATCH requests at the specified path.
+func Patch[T, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
 	registerHelper(r, "PATCH", path, func(c *Context[T]) {
 		var body B
 		if err := c.Bind(&body); err != nil {
-			http.Error(c.res, "Aether: Invalid Request Body", http.StatusBadRequest)
+			http.Error(c.Res(), "Aether: Invalid Request Body", http.StatusBadRequest)
 			return
 		}
 		h(c, body)
 	})
 }
 
+// Head registers a handler for HEAD requests at the specified path.
 func Head[T any](r *Router[T], path string, h HandlerFunc[T]) {
 	registerHelper(r, "HEAD", path, h)
 }
 
+// Connect registers a handler for CONNECT requests at the specified path.
 func Connect[T any](r *Router[T], path string, h HandlerFunc[T]) {
 	registerHelper(r, "CONNECT", path, h)
 }
 
+// Options registers a handler for OPTIONS requests at the specified path.
 func Options[T any](r *Router[T], path string, h HandlerFunc[T]) {
 	registerHelper(r, "OPTIONS", path, h)
 }
 
+// Trace registers a handler for TRACE requests at the specified path.
 func Trace[T any](r *Router[T], path string, h HandlerFunc[T]) {
 	registerHelper(r, "TRACE", path, h)
 }
 
-func Static[T any](r *Router[T], pathPrefix string, rootFolder string) {
+// Static serves static files from the specified root folder.
+func Static[T any](r *Router[T], pathPrefix, rootFolder string) {
 	if !strings.HasSuffix(pathPrefix, "/") {
 		pathPrefix += "/"
 	}
@@ -167,6 +181,6 @@ func Static[T any](r *Router[T], pathPrefix string, rootFolder string) {
 	routePath := pathPrefix + "{filepath...}"
 
 	registerHelper(r, "GET", routePath, func(c *Context[T]) {
-		fs.ServeHTTP(c.res, c.req)
+		fs.ServeHTTP(c.Res(), c.Req())
 	})
 }

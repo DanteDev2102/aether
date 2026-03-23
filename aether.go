@@ -11,10 +11,15 @@ import (
 	"time"
 )
 
+// DefaultMaxBodySize is the default maximum body size for incoming requests.
+const DefaultMaxBodySize = 2 << 20 // 2MB
+
+// TemplateEngine defines the interface for rendering templates.
 type TemplateEngine interface {
 	Render(w io.Writer, name string, data any) error
 }
 
+// Config holds Aether configuration options.
 type Config[T any] struct {
 	Port            int
 	Host            string
@@ -30,6 +35,7 @@ type Config[T any] struct {
 	ErrorHandler    CustomErrorHandler[T]
 }
 
+// App represents the main Aether application instance.
 type App[T any] struct {
 	frozen bool
 	config *Config[T]
@@ -37,6 +43,7 @@ type App[T any] struct {
 	cron   *CronManager
 }
 
+// New creates a new Aether application instance.
 func New[T any](conf *Config[T]) *App[T] {
 	if conf.JSON == nil {
 		conf.JSON = stdJSONEngine{}
@@ -51,7 +58,7 @@ func New[T any](conf *Config[T]) *App[T] {
 		conf.ShutdownTimeout = 10
 	}
 	if conf.MaxBodyBytes == 0 {
-		conf.MaxBodyBytes = 2 << 20 
+		conf.MaxBodyBytes = DefaultMaxBodySize
 	}
 	router := NewRouter[T](conf.JSON, conf.XML, conf.Template, conf.Cache, conf.Logger, conf.Global, conf.Timeout, conf.MaxBodyBytes)
 	router.Use(RecoveryMiddleware[T](conf.ErrorHandler))
@@ -64,10 +71,12 @@ func New[T any](conf *Config[T]) *App[T] {
 	}
 }
 
+// Router returns the router instance.
 func (a *App[T]) Router() *Router[T] {
 	return a.router
 }
 
+// AddCron registers a new cron job with the specified name and interval.
 func (a *App[T]) AddCron(name string, interval time.Duration, job CronJob) {
 	if a.frozen {
 		a.config.Logger.Error("Cannot add cronjobs after Aether is listening")
@@ -76,20 +85,22 @@ func (a *App[T]) AddCron(name string, interval time.Duration, job CronJob) {
 	a.cron.Add(name, interval, job)
 }
 
+// Listen starts the Aether HTTP server and handles graceful shutdown.
 func (a *App[T]) Listen() error {
 	a.frozen = true
 
 	a.cron.Start()
-	
+
 	addr := fmt.Sprintf("%s:%d", a.config.Host, a.config.Port)
 
 	a.config.Logger.Infof("Aether is up and flying! %s", addr)
 
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: a.router,
+		Addr:              addr,
+		Handler:           a.router,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
-	
+
 	if a.config.Timeout > 0 {
 		t := time.Duration(a.config.Timeout) * time.Second
 		srv.ReadTimeout = t
@@ -119,7 +130,7 @@ func (a *App[T]) Listen() error {
 	a.cron.Stop()
 
 	a.config.Logger.Info("Aether has successfully shutdown. See you soon!")
-	a.config.Logger.Sync() 
+	a.config.Logger.Sync()
 
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/DantDev2102/aether"
 )
 
+// LoggerMiddleware logs HTTP requests with method, path, status, and duration.
 func LoggerMiddleware[T any]() aether.HandlerFunc[T] {
 	return func(c *aether.Context[T]) {
 		c.Next()

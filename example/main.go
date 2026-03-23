@@ -56,7 +56,7 @@ func main() {
 
 	// ─── Public Routes ───────────────────────────────────────────────
 	aether.Get(r, "/", func(c *aether.Context[AppState]) {
-		c.JSON(http.StatusOK, map[string]any{
+		_ = c.JSON(http.StatusOK, map[string]any{
 			"message": "Welcome to Aether!",
 			"version": c.Global.Version,
 			"uptime":  time.Since(c.Global.StartAt).String(),
@@ -64,7 +64,7 @@ func main() {
 	})
 
 	aether.Get(r, "/health", func(c *aether.Context[AppState]) {
-		c.JSON(http.StatusOK, map[string]string{"status": "healthy"})
+		_ = c.JSON(http.StatusOK, map[string]string{"status": "healthy"})
 	})
 
 	// ─── API Group ───────────────────────────────────────────────────
@@ -78,7 +78,7 @@ func main() {
 
 	// Users CRUD
 	aether.Get(api, "/users", func(c *aether.Context[AppState]) {
-		c.JSON(http.StatusOK, []map[string]any{
+		_ = c.JSON(http.StatusOK, []map[string]any{
 			{"id": 1, "name": "Alice", "email": "alice@example.com"},
 			{"id": 2, "name": "Bob", "email": "bob@example.com"},
 		})
@@ -86,14 +86,14 @@ func main() {
 
 	aether.Get(api, "/users/{id}", func(c *aether.Context[AppState]) {
 		id := c.Param("id")
-		c.JSON(http.StatusOK, map[string]string{
+		_ = c.JSON(http.StatusOK, map[string]string{
 			"id":   id,
 			"name": "Alice",
 		})
 	})
 
 	aether.Post[AppState, CreateUserBody](api, "/users", func(c *aether.Context[AppState], body CreateUserBody) {
-		c.JSON(http.StatusCreated, map[string]any{
+		_ = c.JSON(http.StatusCreated, map[string]any{
 			"id":    3,
 			"name":  body.Name,
 			"email": body.Email,
@@ -101,14 +101,14 @@ func main() {
 	})
 
 	aether.Put[AppState, UpdateUserBody](api, "/users/{id}", func(c *aether.Context[AppState], body UpdateUserBody) {
-		c.JSON(http.StatusOK, map[string]any{
+		_ = c.JSON(http.StatusOK, map[string]any{
 			"id":   c.Param("id"),
 			"name": body.Name,
 		})
 	})
 
 	aether.Delete(api, "/users/{id}", func(c *aether.Context[AppState]) {
-		c.JSON(http.StatusOK, map[string]string{
+		_ = c.JSON(http.StatusOK, map[string]string{
 			"message": fmt.Sprintf("User %s deleted", c.Param("id")),
 		})
 	})
@@ -118,7 +118,7 @@ func main() {
 		ctx := c.Req().Context()
 		val, ok := c.Cache().Get(ctx, "expensive_data")
 		if ok {
-			c.JSON(http.StatusOK, map[string]any{
+			_ = c.JSON(http.StatusOK, map[string]any{
 				"source": "cache",
 				"data":   val,
 			})
@@ -126,9 +126,9 @@ func main() {
 		}
 
 		data := map[string]string{"result": "computed value"}
-		c.Cache().Set(ctx, "expensive_data", data)
+		_ = c.Cache().Set(ctx, "expensive_data", data)
 
-		c.JSON(http.StatusOK, map[string]any{
+		_ = c.JSON(http.StatusOK, map[string]any{
 			"source": "computed",
 			"data":   data,
 		})
@@ -143,16 +143,16 @@ func main() {
 			MaxAge:   86400,
 			HttpOnly: true,
 		})
-		c.JSON(http.StatusOK, map[string]string{"message": "Cookie set!"})
+		_ = c.JSON(http.StatusOK, map[string]string{"message": "Cookie set!"})
 	})
 
 	aether.Get(r, "/get-cookie", func(c *aether.Context[AppState]) {
 		cookie, err := c.Cookie("theme")
 		if err != nil {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "Cookie not found"})
+			_ = c.JSON(http.StatusNotFound, map[string]string{"error": "Cookie not found"})
 			return
 		}
-		c.JSON(http.StatusOK, map[string]string{"theme": cookie.Value})
+		_ = c.JSON(http.StatusOK, map[string]string{"theme": cookie.Value})
 	})
 
 	// ─── Protected Routes (JWT) ──────────────────────────────────────
@@ -163,7 +163,7 @@ func main() {
 
 	aether.Get(protected, "/dashboard", func(c *aether.Context[AppState]) {
 		claims := middlewares.GetMapClaims(c)
-		c.JSON(http.StatusOK, map[string]any{
+		_ = c.JSON(http.StatusOK, map[string]any{
 			"message": "Welcome to admin dashboard",
 			"claims":  claims,
 		})
@@ -178,8 +178,8 @@ func main() {
 		}
 
 		for i := 0; i < 5; i++ {
-			fmt.Fprintf(c.Res(), "data: Event %d at %s\n\n", i, time.Now().Format(time.RFC3339))
-			rc.Flush()
+			_, _ = fmt.Fprintf(c.Res(), "data: Event %d at %s\n\n", i, time.Now().Format(time.RFC3339))
+			_ = rc.Flush()
 			time.Sleep(1 * time.Second)
 		}
 	})
@@ -193,5 +193,5 @@ func main() {
 	})
 
 	// ─── Start Server ────────────────────────────────────────────────
-	app.Listen()
+	_ = app.Listen()
 }
