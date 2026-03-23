@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DantDev2102/aether"
+	"github.com/DanteDev2102/aether"
 )
 
 // RateLimiterStore defines the interface for rate limiting storage.

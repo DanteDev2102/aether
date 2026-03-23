@@ -3,7 +3,7 @@ package middlewares
 import (
 	"context"
 
-	"github.com/DantDev2102/aether"
+	"github.com/DanteDev2102/aether"
 	"github.com/google/uuid"
 )
 

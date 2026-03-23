@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/DantDev2102/aether"
+	"github.com/DanteDev2102/aether"
 	"github.com/golang-jwt/jwt/v5"
 )
 

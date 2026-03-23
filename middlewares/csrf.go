@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	"github.com/DantDev2102/aether"
+	"github.com/DanteDev2102/aether"
 )
 
 // CSRFConfig holds configuration for CSRF protection middleware.

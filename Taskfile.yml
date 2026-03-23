@@ -1,7 +1,7 @@
 version: "3"
 
 vars:
-  MODULE: github.com/DantDev2102/aether
+  MODULE: github.com/DanteDev2102/aether
   COVERAGE_DIR: coverage
 
 tasks:

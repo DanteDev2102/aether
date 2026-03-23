@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/DantDev2102/aether"
-	"github.com/DantDev2102/aether/middlewares"
+	"github.com/DanteDev2102/aether"
+	"github.com/DanteDev2102/aether/middlewares"
 )
 
 type AppState struct {

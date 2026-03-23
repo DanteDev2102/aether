@@ -11,6 +11,7 @@ This file contains guidelines for agentic coding agents operating in this reposi
 All commands can be run via `task <command>` (requires [go-task](https://taskfile.dev/)) or directly with the underlying tool.
 
 ### Build
+
 ```bash
 go build ./...
 # or
@@ -18,6 +19,7 @@ task build
 ```
 
 ### Test
+
 ```bash
 # All tests with race detection
 go test -race -v ./...
@@ -33,6 +35,7 @@ task test-coverage
 ```
 
 ### Lint
+
 ```bash
 golangci-lint run ./...
 # or
@@ -40,6 +43,7 @@ task lint
 ```
 
 ### Security
+
 ```bash
 govulncheck ./...
 # or
@@ -47,6 +51,7 @@ task security
 ```
 
 ### Benchmarks
+
 ```bash
 go test -bench=. -benchmem ./...
 # or
@@ -54,6 +59,7 @@ task bench
 ```
 
 ### Full Setup
+
 ```bash
 task setup
 ```
@@ -61,15 +67,18 @@ task setup
 ## Code Style Guidelines
 
 ### Formatting
+
 - Code is formatted with **gofumpt** (extra-rules enabled) and **gci** for imports
 - Run formatters automatically before committing: `gofumpt -w .` and `gci write .`
 - Golangci-lint handles formatting enforcement in CI
 
 ### Import Organization
+
 Imports are ordered via gci sections:
+
 1. **Standard library** (e.g., `context`, `net/http`)
 2. **Default/third-party** (e.g., `github.com/golang-jwt/jwt/v5`)
-3. **Internal prefix** (`github.com/DantDev2102/aether`)
+3. **Internal prefix** (`github.com/DanteDev2102/aether`)
 
 ```go
 import (
@@ -80,11 +89,12 @@ import (
     "github.com/golang-jwt/jwt/v5"
     "github.com/google/uuid"
 
-    "github.com/DantDev2102/aether"
+    "github.com/DanteDev2102/aether"
 )
 ```
 
 ### Naming Conventions
+
 - **Exported types/functions**: PascalCase (e.g., `App`, `NewRouter`, `Get`)
 - **Unexported types/functions**: camelCase (e.g., `registerHelper`, `responseWriter`)
 - **Interfaces**: PascalCase with descriptive names (e.g., `CacheStore`, `JSONEngine`, `Logger`)
@@ -94,6 +104,7 @@ import (
 - **Variables**: camelCase; acronyms are kept uppercase (ID, URL, API, HTTP, UUID)
 
 ### Documentation
+
 - **All exported** functions, types, constants, and interfaces **must have doc comments**
 - Comments start with the name of the element being documented
 - Use clear, concise descriptions; no markdown formatting needed
@@ -107,10 +118,12 @@ func Get[T any](r *Router[T], path string, h HandlerFunc[T]) { ... }
 ```
 
 ### Cyclomatic Complexity
+
 - Maximum complexity: **15** (enforced by gocyclo)
 - Break complex functions into smaller, focused helpers
 
 ### Error Handling
+
 - Return errors from functions when operations can fail
 - Use named returns for functions with multiple error conditions when idiomatic
 - Ignore predictable errors with `_` only when safe (e.g., `io.NopCloser`)
@@ -118,6 +131,7 @@ func Get[T any](r *Router[T], path string, h HandlerFunc[T]) { ... }
 - Panic recovery is only for truly unrecoverable states (see `recovery.go` pattern)
 
 ### Generic Type Parameters
+
 The framework uses Go generics extensively. Follow these patterns:
 
 ```go
@@ -134,12 +148,13 @@ func Post[T, B any](r *Router[T], path string, h HandlerWithBody[T, B])
 ```
 
 ### Middleware Pattern
+
 All middleware should follow this pattern:
 
 ```go
 package middlewares
 
-import "github.com/DantDev2102/aether"
+import "github.com/DanteDev2102/aether"
 
 type MyMiddlewareConfig struct {
     // Configuration fields with zero values as defaults
@@ -156,12 +171,14 @@ func MyMiddleware[T any](cfg MyMiddlewareConfig) aether.HandlerFunc[T] {
 ```
 
 ### File Structure
+
 - **Root package**: Core framework (`aether.go`, `router.go`, `context.go`, `cache.go`, etc.)
 - **middlewares/**: Each middleware in its own file (`jwt.go`, `cors.go`, `rate_limiter.go`, etc.)
 - **docs/**: Documentation for each feature
 - **example/**: Runnable example application
 
 ### Tests
+
 - Use `net/http/httptest` for HTTP testing
 - Test names: `Test<Feature>_<Scenario>` format
 - Always test both success and error paths
@@ -189,6 +206,7 @@ func TestGetRoute_Success(t *testing.T) {
 ```
 
 ### Commit Messages
+
 Follow **Conventional Commits** (enforced via lefthook):
 
 ```
@@ -211,6 +229,7 @@ Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `buil
 ## Pre-commit Hooks
 
 Lefthook is configured to run on commit:
+
 - **pre-commit**: Runs `task lint` on `*.go` files
 - **commit-msg**: Validates conventional commit format
 

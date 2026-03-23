@@ -54,7 +54,7 @@ Follow the existing middleware pattern:
 package middlewares
 
 import (
-    "github.com/DantDev2102/aether"
+    "github.com/DanteDev2102/aether"
 )
 
 type MyMiddlewareConfig struct {
@@ -111,14 +111,14 @@ func TestMyFeature(t *testing.T) {
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):
 
-| Prefix   | Usage                          |
-|----------|--------------------------------|
-| `feat:`  | New feature                    |
-| `fix:`   | Bug fix                        |
-| `docs:`  | Documentation only             |
-| `test:`  | Adding or updating tests       |
+| Prefix      | Usage                                  |
+| ----------- | -------------------------------------- |
+| `feat:`     | New feature                            |
+| `fix:`      | Bug fix                                |
+| `docs:`     | Documentation only                     |
+| `test:`     | Adding or updating tests               |
 | `refactor:` | Code change with no new feature or fix |
-| `chore:` | Build process or tooling       |
+| `chore:`    | Build process or tooling               |
 
 ## Pull Request Guidelines
 

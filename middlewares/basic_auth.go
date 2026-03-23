@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 
-	"github.com/DantDev2102/aether"
+	"github.com/DanteDev2102/aether"
 )
 
 // BasicAuthConfig holds configuration for Basic Authentication middleware.

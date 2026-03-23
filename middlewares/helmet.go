@@ -3,7 +3,7 @@ package middlewares
 import (
 	"fmt"
 
-	"github.com/DantDev2102/aether"
+	"github.com/DanteDev2102/aether"
 )
 
 // HelmetConfig holds configuration for security headers middleware.

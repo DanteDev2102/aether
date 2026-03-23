@@ -3,7 +3,7 @@ package middlewares
 import (
 	"time"
 
-	"github.com/DantDev2102/aether"
+	"github.com/DanteDev2102/aether"
 )
 
 // LoggerMiddleware logs HTTP requests with method, path, status, and duration.
