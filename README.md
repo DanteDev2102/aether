@@ -20,7 +20,7 @@ A blazing-fast, type-safe Go web framework built on top of `net/http` with first
 ## Quick Start
 
 ```bash
-go get github.com/DantDev2102/aether
+go get github.com/DanteDev2102/aether
 ```
 
 ```go
@@ -28,7 +28,7 @@ package main
 
 import (
     "net/http"
-    "github.com/DantDev2102/aether"
+    "github.com/DanteDev2102/aether"
 )
 
 type AppState struct {
@@ -124,7 +124,7 @@ Recovery and Logger middlewares are automatically applied.
 ### Middleware Package
 
 ```go
-import "github.com/DantDev2102/aether/middlewares"
+import "github.com/DanteDev2102/aether/middlewares"
 
 // CORS
 r.Use(middlewares.CORSMiddleware[AppState](middlewares.CORSConfig{

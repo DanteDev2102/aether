@@ -3,7 +3,7 @@
 ## Installation
 
 ```bash
-go get github.com/DantDev2102/aether
+go get github.com/DanteDev2102/aether
 ```
 
 Requires **Go 1.22+** (uses the new `http.ServeMux` pattern matching).
@@ -15,7 +15,7 @@ package main
 
 import (
     "net/http"
-    "github.com/DantDev2102/aether"
+    "github.com/DanteDev2102/aether"
 )
 
 type AppState struct{}
