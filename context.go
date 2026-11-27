@@ -89,8 +89,8 @@ type Context[T any] struct {
 	Global   T
 }
 
-// Reset initializes or resets the context with new values.
-func (c *Context[T]) Reset(w http.ResponseWriter, req *http.Request, handlers []HandlerFunc[T], json JSONEngine, xml XMLEngine, template TemplateEngine, cache CacheStore, log Logger, global T) {
+// reset initializes the context for a new request.
+func (c *Context[T]) reset(w http.ResponseWriter, req *http.Request, handlers []HandlerFunc[T], json JSONEngine, xml XMLEngine, template TemplateEngine, cache CacheStore, log Logger, global T) {
 	c.ctx = req.Context()
 	c.req = req
 	c.res = &responseWriter{ResponseWriter: w}

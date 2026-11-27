@@ -95,7 +95,7 @@ import (
 
 ### Naming Conventions
 
-- **Exported types/functions**: PascalCase (e.g., `App`, `NewRouter`, `Get`)
+- **Exported types/functions**: PascalCase (e.g., `App`, `NewGroup`, `Get`)
 - **Unexported types/functions**: camelCase (e.g., `registerHelper`, `responseWriter`)
 - **Interfaces**: PascalCase with descriptive names (e.g., `CacheStore`, `JSONEngine`, `Logger`)
 - **Config structs**: `<Feature>Config` suffix (e.g., `JWTConfig`, `CORSConfig`)

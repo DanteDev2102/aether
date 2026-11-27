@@ -27,7 +27,13 @@ go get github.com/DanteDev2102/aether
 package main
 
 import (
+    "context"
+    "log"
     "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+
     "github.com/DanteDev2102/aether"
 )
 
@@ -50,7 +56,12 @@ func main() {
         })
     })
 
-    app.Listen()
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    if err := app.Listen(ctx); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 

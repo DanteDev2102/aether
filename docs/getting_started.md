@@ -14,7 +14,13 @@ Requires **Go 1.22+** (uses the new `http.ServeMux` pattern matching).
 package main
 
 import (
+    "context"
+    "log"
     "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+
     "github.com/DanteDev2102/aether"
 )
 
@@ -33,8 +39,25 @@ func main() {
         })
     })
 
-    app.Listen()
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    if err := app.Listen(ctx); err != nil {
+        log.Fatal(err)
+    }
 }
+```
+
+## Starting and stopping
+
+`Listen(ctx)` serves until `ctx` is canceled and then shuts down gracefully,
+waiting up to `ShutdownTimeout` for in-flight requests. It returns an error if
+the address cannot be bound, so nothing calls `os.Exit` behind your back.
+
+```go
+app.Listen(ctx)                                  // HTTP on Host:Port
+app.ListenTLS(ctx, "cert.pem", "key.pem")       // HTTPS
+app.Serve(ctx, listener)                         // existing net.Listener (tests, socket activation)
 ```
 
 ## Configuration
@@ -43,8 +66,9 @@ func main() {
 |-------------------|--------------------|-------------|--------------------------------------|
 | `Port`            | `int`              | `0`         | Port to listen on                    |
 | `Host`            | `string`           | `""`        | Host address                         |
-| `Timeout`         | `int`              | `0`         | Request timeout in seconds           |
-| `ShutdownTimeout` | `int`              | `10`        | Graceful shutdown timeout in seconds |
+| `Timeout`         | `time.Duration`    | `0`         | Request timeout (0 = none)           |
+| `ShutdownTimeout` | `time.Duration`    | `10s`       | Graceful shutdown timeout            |
+| `TLSConfig`       | `*tls.Config`      | `nil`       | TLS settings for `ListenTLS`         |
 | `MaxBodyBytes`    | `int64`            | `2MB`       | Maximum request body size            |
 | `JSON`            | `JSONEngine`       | `std json`  | JSON encoder/decoder                 |
 | `XML`             | `XMLEngine`        | `std xml`   | XML encoder/decoder                  |
