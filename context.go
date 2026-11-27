@@ -98,6 +98,17 @@ func (c *Context[T]) Reset(w http.ResponseWriter, req *http.Request, handlers []
 	c.Global = global
 }
 
+// release drops references held by the context so pooled contexts do not keep
+// requests, responses or global state alive between requests.
+func (c *Context[T]) release() {
+	var zero T
+	c.ctx = nil
+	c.req = nil
+	c.res = nil
+	c.handlers = nil
+	c.Global = zero
+}
+
 // Req returns the current HTTP request.
 func (c *Context[T]) Req() *http.Request {
 	return c.req

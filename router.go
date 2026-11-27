@@ -29,8 +29,33 @@ func (r *Router[T]) Use(middlewares ...HandlerFunc[T]) {
 	r.middlewares = append(r.middlewares, middlewares...)
 }
 
+// ServeHTTP dispatches the request to the matching route. Requests that do not
+// match any route (404, 405, CORS preflight) still run through the router's
+// middlewares before the default response is written, so global middlewares
+// such as CORS or recovery apply to them as well.
 func (r *Router[T]) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	r.mux.ServeHTTP(w, req)
+	if _, pattern := r.mux.Handler(req); pattern != "" || len(r.middlewares) == 0 {
+		r.mux.ServeHTTP(w, req)
+		return
+	}
+
+	chain := make([]HandlerFunc[T], len(r.middlewares)+1)
+	copy(chain, r.middlewares)
+	chain[len(r.middlewares)] = func(c *Context[T]) {
+		r.mux.ServeHTTP(c.Res(), c.Req())
+	}
+
+	r.serve(w, req, chain)
+}
+
+func (r *Router[T]) serve(w http.ResponseWriter, req *http.Request, chain []HandlerFunc[T]) {
+	c := r.ctxPool.Get().(*Context[T])
+	c.Reset(w, req, chain, r.json, r.xml, r.template, r.cache, r.log, r.global)
+
+	c.Next()
+
+	c.release()
+	r.ctxPool.Put(c)
 }
 
 // NewGroup creates a new router group with the specified prefix.
@@ -94,12 +119,7 @@ func registerHelper[T any](r *Router[T], method, path string, finalHandler Handl
 			req.Body = http.MaxBytesReader(w, req.Body, r.maxBodyBytes)
 		}
 
-		c := r.ctxPool.Get().(*Context[T])
-		c.Reset(w, req, chain, r.json, r.xml, r.template, r.cache, r.log, r.global)
-
-		c.Next()
-
-		r.ctxPool.Put(c)
+		r.serve(w, req, chain)
 	})
 }
 

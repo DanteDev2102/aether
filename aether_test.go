@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -430,4 +431,68 @@ func TestWrapMiddleware(t *testing.T) {
 	if w.Header().Get("X-Wrapped") != "true" {
 		t.Errorf("expected X-Wrapped header 'true', got '%s'", w.Header().Get("X-Wrapped"))
 	}
+}
+
+func TestGlobalMiddleware_RunsOnUnmatchedRoutes(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+
+	r.Use(func(c *Context[testGlobal]) {
+		c.Res().Header().Set("X-Global", "1")
+		if c.Req().Method == http.MethodOptions {
+			c.Res().WriteHeader(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	})
+
+	Post(r, "/items", func(c *Context[testGlobal], _ struct{}) {
+		_ = c.String(http.StatusOK, "ok")
+	})
+
+	cases := []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/missing", http.StatusNotFound},
+		{http.MethodGet, "/items", http.StatusMethodNotAllowed},
+		{http.MethodOptions, "/items", http.StatusNoContent},
+	}
+
+	for _, tc := range cases {
+		req := httptest.NewRequestWithContext(context.Background(), tc.method, tc.path, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != tc.want {
+			t.Errorf("%s %s: expected status %d, got %d", tc.method, tc.path, tc.want, w.Code)
+		}
+		if w.Header().Get("X-Global") != "1" {
+			t.Errorf("%s %s: global middleware did not run", tc.method, tc.path)
+		}
+	}
+}
+
+func TestGroupRoutes_ConcurrentRequests(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	api := NewGroup("/api", r)
+	Get(api, "/ping", func(c *Context[testGlobal]) {
+		_ = c.String(http.StatusOK, "pong")
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/ping", nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+			}
+		}()
+	}
+	wg.Wait()
 }
