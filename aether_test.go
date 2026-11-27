@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -753,5 +755,23 @@ func TestOtterStore_DeleteAndClear(t *testing.T) {
 	_ = store.Clear(ctx)
 	if _, ok := store.Get(ctx, "b"); ok {
 		t.Errorf("expected cache to be cleared")
+	}
+}
+
+func TestNewSlogLogger_WritesThroughHandler(t *testing.T) {
+	var buf bytes.Buffer
+	log := NewSlogLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	log.Infof("hello %s", "aether")
+	log.Debug("dbg")
+	log.Sync()
+
+	out := buf.String()
+	if !strings.Contains(out, "hello aether") || !strings.Contains(out, "level=DEBUG") {
+		t.Errorf("unexpected log output: %q", out)
+	}
+
+	if NewSlogLogger(nil) == nil {
+		t.Errorf("expected a logger for nil input")
 	}
 }

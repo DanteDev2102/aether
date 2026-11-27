@@ -6,7 +6,7 @@
 go get github.com/DanteDev2102/aether
 ```
 
-Requires **Go 1.22+** (uses the new `http.ServeMux` pattern matching).
+Requires **Go 1.25+**.
 
 ## Your First App
 
@@ -103,4 +103,26 @@ aether.Get(r, "/version", func(c *aether.Context[AppState]) {
 
 ## Graceful Shutdown
 
-Aether automatically handles `SIGINT` and `SIGTERM` signals, gracefully shutting down the HTTP server and stopping all cron jobs before exiting.
+Aether does not install signal handlers itself. Cancel the context passed to
+`Listen` to stop it; `signal.NotifyContext` ties that to `SIGINT`/`SIGTERM`.
+The server then waits up to `ShutdownTimeout` for in-flight requests and stops
+all cron jobs before `Listen` returns.
+
+## Logging
+
+The default logger writes asynchronously to stdout. Configure it with
+`NewLogger`, or plug in any `*slog.Logger` with `NewSlogLogger`:
+
+```go
+// Built-in logger: stdout and/or files, minimum level
+logger := aether.NewLogger(aether.LogConfig{
+    Stdout:    true,
+    FilePaths: []string{"logs/app.log"},
+    Level:     slog.LevelDebug,
+})
+
+// Any slog handler, e.g. JSON
+logger := aether.NewSlogLogger(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+app := aether.New(&aether.Config[AppState]{Logger: logger})
+```

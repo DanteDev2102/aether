@@ -130,7 +130,7 @@ res := c.Res()
 
 ### Built-in (root package)
 
-Recovery and Logger middlewares are automatically applied.
+Recovery is applied automatically. Request logging is opt-in with `middlewares.LoggerMiddleware`.
 
 ### Middleware Package
 
@@ -214,7 +214,7 @@ app := aether.New(&aether.Config[AppState]{
     XML:      myCustomXMLEngine{},      // implements XMLEngine
     Template: myHandlebarsEngine{},     // implements TemplateEngine
     Cache:    myRedisStore{},           // implements CacheStore
-    Logger:   myZapLogger{},            // implements Logger
+    Logger:   aether.NewSlogLogger(slog.Default()), // any *slog.Logger, or your own Logger
 })
 ```
 
