@@ -28,7 +28,7 @@ api.Use(AuthMiddleware[AppState]())
 ## Built-in Middlewares
 
 ### Recovery (auto-applied)
-Catches panics and returns a 500 response. Configured via `Config.ErrorHandler`.
+Catches panics and returns a generic 500 JSON response (the panic value is logged, never sent to the client). Configured via `Config.ErrorHandler`.
 
 ### Logger (auto-applied)
 Logs method, path, status code, and duration for every request.
@@ -49,13 +49,15 @@ r.Use(middlewares.CORSMiddleware[T](middlewares.CORSConfig{
 }))
 ```
 
+Only the request's `Origin` is echoed back when it is in `AllowOrigins` (with `Vary: Origin`). An empty list or `"*"` allows any origin, but combining a wildcard with `AllowCredentials: true` panics at startup because browsers reject it; list the origins or use `AllowOriginFunc` instead. Preflight requests (`OPTIONS` with `Access-Control-Request-Method`) are answered with `204` even for routes that only register other methods.
+
 ### Helmet (Security Headers)
 ```go
 r.Use(middlewares.HelmetMiddleware[T](middlewares.DefaultHelmetConfig()))
 
 // Or customize:
 r.Use(middlewares.HelmetMiddleware[T](middlewares.HelmetConfig{
-    XSSProtection:         "1; mode=block",
+    XSSProtection:         "0", // legacy header; rely on CSP
     ContentTypeNosniff:    "nosniff",
     XFrameOptions:         "DENY",
     HSTSMaxAge:            31536000,
@@ -70,7 +72,7 @@ r.Use(middlewares.RateLimiterMiddleware[T](middlewares.RateLimiterConfig{
     Limit:        100,                    // Max requests per window
     Window:       time.Minute,            // Time window
     Store:        customStore,            // Custom store (optional)
-    TrustProxies: []string{"10.0.0.1"},   // Trusted proxy IPs
+    TrustProxies: []string{"10.0.0.0/8"}, // Trusted proxy IPs or CIDRs
     SkipFunc: func(req *http.Request) bool {
         return req.URL.Path == "/health"  // Skip rate limiting
     },
@@ -79,10 +81,20 @@ r.Use(middlewares.RateLimiterMiddleware[T](middlewares.RateLimiterConfig{
 
 ### JWT Authentication
 ```go
-r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig{
+r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig[T]{
     Secret:      []byte("your-secret"),
     TokenLookup: "header:Authorization",  // or "query:token" or "cookie:jwt"
 }))
+
+// Custom error response (receives the real request context):
+r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig[T]{
+    Secret: []byte("your-secret"),
+    ErrorHandler: func(c *aether.Context[T], err error) {
+        _ = c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
+    },
+}))
+
+// JWTMiddleware panics at startup when neither Secret nor Validator is set.
 
 // Access claims in handler:
 claims := middlewares.GetMapClaims(c)
@@ -97,7 +109,7 @@ func (v *MyValidator) Validate(tokenString string) (jwt.Claims, error) {
     // Your custom validation logic
 }
 
-r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig{
+r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig[T]{
     Validator: &MyValidator{},
 }))
 ```
@@ -139,7 +151,11 @@ r.Use(middlewares.CSRFMiddleware[T](middlewares.CSRFConfig{
 ### Request ID
 ```go
 r.Use(middlewares.RequestIDMiddleware[T]())
-// Adds X-Request-Id header to every response
+// Adds X-Request-Id header to every response. A valid incoming ID
+// (max 128 chars of letters, digits and "-_.:") is reused.
+
+// Read it in a handler:
+rid := middlewares.GetRequestID(c)
 ```
 
 ### Gzip Compression

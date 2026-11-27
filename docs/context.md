@@ -34,7 +34,8 @@ err := c.Bind(&data)
 ```go
 c.JSON(200, data)                       // JSON response
 c.XML(200, data)                        // XML response
-c.String(200, "Hello %s", name)         // Plain text
+c.String(200, "Hello")                    // Plain text, written as is
+c.Stringf(200, "Hello %s", name)         // Plain text with formatting
 c.Render(200, "template_name", data)    // HTML template (requires TemplateEngine)
 ```
 

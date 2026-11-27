@@ -86,7 +86,7 @@ page := c.Query("page")
 // Responses
 c.JSON(200, data)
 c.XML(200, data)
-c.String(200, "Hello %s", name)
+c.Stringf(200, "Hello %s", name)
 c.Render(200, "template_name", data)   // Requires configured TemplateEngine
 
 // Files
@@ -141,7 +141,7 @@ r.Use(middlewares.RateLimiterMiddleware[AppState](middlewares.RateLimiterConfig{
 }))
 
 // JWT Authentication
-r.Use(middlewares.JWTMiddleware[AppState](middlewares.JWTConfig{
+r.Use(middlewares.JWTMiddleware[AppState](middlewares.JWTConfig[AppState]{
     Secret: []byte("your-secret-key"),
 }))
 

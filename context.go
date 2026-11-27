@@ -23,6 +23,7 @@ type ResponseWriter interface {
 	http.ResponseWriter
 	Status() int
 	Size() int
+	Written() bool
 	Unwrap() http.ResponseWriter
 }
 
@@ -62,6 +63,12 @@ func (rw *responseWriter) Size() int {
 	return rw.size
 }
 
+// Written reports whether the response status has already been sent.
+func (rw *responseWriter) Written() bool {
+	return rw.status != 0
+}
+
+// Unwrap returns the underlying http.ResponseWriter.
 func (rw *responseWriter) Unwrap() http.ResponseWriter {
 	return rw.ResponseWriter
 }
@@ -98,6 +105,17 @@ func (c *Context[T]) Reset(w http.ResponseWriter, req *http.Request, handlers []
 	c.Global = global
 }
 
+// release drops references held by the context so pooled contexts do not keep
+// requests, responses or global state alive between requests.
+func (c *Context[T]) release() {
+	var zero T
+	c.ctx = nil
+	c.req = nil
+	c.res = nil
+	c.handlers = nil
+	c.Global = zero
+}
+
 // Req returns the current HTTP request.
 func (c *Context[T]) Req() *http.Request {
 	return c.req
@@ -108,9 +126,16 @@ func (c *Context[T]) SetReq(req *http.Request) {
 	c.req = req
 }
 
-// Res returns the current HTTP response writer.
+// Res returns the current HTTP response writer. The returned value always
+// implements ResponseWriter.
 func (c *Context[T]) Res() http.ResponseWriter {
 	return c.res
+}
+
+// SetRes replaces the response writer used by the context. Middlewares use it
+// to wrap the response, for example to compress it.
+func (c *Context[T]) SetRes(w ResponseWriter) {
+	c.res = w
 }
 
 // Log returns the logger instance.
@@ -182,25 +207,47 @@ func (c *Context[T]) Next() {
 	}
 }
 
-// JSON writes a JSON response with the specified status code.
+// JSON writes a JSON response with the specified status code. The value is
+// encoded before anything is written, so an encoding error leaves the response
+// untouched and the caller can still send an error response.
 func (c *Context[T]) JSON(status int, data any) error {
-	c.res.Header().Set("Content-Type", "application/json")
-	c.res.WriteHeader(status)
-	return c.json.Encode(c.res, data)
+	return c.encoded(status, "application/json", c.json.Encode, data)
 }
 
-// XML writes an XML response with the specified status code.
+// XML writes an XML response with the specified status code. Like JSON, it
+// encodes the value before writing anything.
 func (c *Context[T]) XML(status int, data any) error {
-	c.res.Header().Set("Content-Type", "application/xml")
-	c.res.WriteHeader(status)
-	return c.xml.Encode(c.res, data)
+	return c.encoded(status, "application/xml", c.xml.Encode, data)
 }
 
-func (c *Context[T]) String(status int, text string, args ...any) error {
+func (c *Context[T]) encoded(status int, contentType string, encode func(io.Writer, any) error, data any) error {
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+
+	if err := encode(buf, data); err != nil {
+		return err
+	}
+
+	c.res.Header().Set("Content-Type", contentType)
+	c.res.WriteHeader(status)
+	_, err := c.res.Write(buf.Bytes())
+	return err
+}
+
+// String writes text as a plain text response with the specified status code.
+// The text is written as is; use Stringf to format it.
+func (c *Context[T]) String(status int, text string) error {
 	c.res.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.res.WriteHeader(status)
-	_, err := fmt.Fprintf(c.res, text, args...)
+	_, err := io.WriteString(c.res, text)
 	return err
+}
+
+// Stringf formats according to a format specifier and writes the result as a
+// plain text response with the specified status code.
+func (c *Context[T]) Stringf(status int, format string, args ...any) error {
+	return c.String(status, fmt.Sprintf(format, args...))
 }
 
 // Render renders a template with the specified name and data.
@@ -309,17 +356,21 @@ func (c *Context[T]) Bind(v any) error {
 	return c.bindJSON(v)
 }
 
+// bindJSON decodes the JSON body into v. An empty body is not an error and
+// leaves v unchanged.
 func (c *Context[T]) bindJSON(v any) error {
 	body, err := c.GetBody()
-	if err != nil {
+	if err != nil || len(body) == 0 {
 		return err
 	}
 	return c.json.Decode(bytes.NewReader(body), v)
 }
 
+// bindXML decodes the XML body into v. An empty body is not an error and
+// leaves v unchanged.
 func (c *Context[T]) bindXML(v any) error {
 	body, err := c.GetBody()
-	if err != nil {
+	if err != nil || len(body) == 0 {
 		return err
 	}
 	return c.xml.Decode(bytes.NewReader(body), v)

@@ -2,6 +2,7 @@ package middlewares
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 
@@ -94,7 +95,7 @@ func CSRFMiddleware[T any](cfg CSRFConfig) aether.HandlerFunc[T] {
 			clientToken = c.Req().FormValue(cfg.CookieName)
 		}
 
-		if clientToken == "" || clientToken != token {
+		if clientToken == "" || subtle.ConstantTimeCompare([]byte(clientToken), []byte(token)) != 1 {
 			_ = c.JSON(http.StatusForbidden, map[string]string{
 				"error": "Invalid CSRF token",
 			})

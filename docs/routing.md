@@ -23,7 +23,7 @@ aether.Trace(r, "/path", handler)
 ```go
 aether.Get(r, "/users/{id}", func(c *aether.Context[T]) {
     id := c.Param("id")
-    c.String(200, "User: %s", id)
+    c.Stringf(200, "User: %s", id)
 })
 
 // Wildcard (catch-all)

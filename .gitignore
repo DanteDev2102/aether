@@ -3,3 +3,6 @@ logs/
 public/
 .direnv/
 .task/
+go.work
+go.work.sum
+coverage/

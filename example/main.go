@@ -48,7 +48,7 @@ func main() {
 
 	// ─── Global Middlewares ───────────────────────────────────────────
 	r.Use(middlewares.CORSMiddleware[AppState](middlewares.CORSConfig{
-		AllowOrigins:     []string{"*"},
+		AllowOrigins:     []string{"http://localhost:3000"},
 		AllowCredentials: true,
 	}))
 	r.Use(middlewares.HelmetMiddleware[AppState](middlewares.DefaultHelmetConfig()))
@@ -157,7 +157,7 @@ func main() {
 
 	// ─── Protected Routes (JWT) ──────────────────────────────────────
 	protected := aether.NewGroup("/admin", r)
-	protected.Use(middlewares.JWTMiddleware[AppState](middlewares.JWTConfig{
+	protected.Use(middlewares.JWTMiddleware[AppState](middlewares.JWTConfig[AppState]{
 		Secret: []byte("my-super-secret-key"),
 	}))
 
