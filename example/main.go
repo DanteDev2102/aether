@@ -29,7 +29,7 @@ type UpdateUserBody struct {
 
 func main() {
 	// Inicializar otter cache
-	cache, err := aether.NewOtterStore(10000)
+	cache, err := aether.NewOtterStore(aether.OtterConfig{MaxSize: 10000})
 	if err != nil {
 		panic(err)
 	}

@@ -191,7 +191,7 @@ app.AddCron("cleanup", 1*time.Hour, func(ctx context.Context, log aether.Logger)
 
 ```go
 // Use the default Otter in-memory cache
-store, _ := aether.NewOtterStore(10000)
+store, _ := aether.NewOtterStore(aether.OtterConfig{MaxSize: 10000})
 
 app := aether.New(&aether.Config[AppState]{
     Cache: store,

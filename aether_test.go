@@ -361,7 +361,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 }
 
 func TestCacheAccessor(t *testing.T) {
-	store, err := NewOtterStore(100)
+	store, err := NewOtterStore(OtterConfig{MaxSize: 100})
 	if err != nil {
 		t.Fatalf("failed to create otter store: %v", err)
 	}
@@ -716,5 +716,42 @@ func TestRequestTimeout_SetsContextDeadline(t *testing.T) {
 
 	if w.Code != http.StatusGatewayTimeout {
 		t.Errorf("expected status %d, got %d", http.StatusGatewayTimeout, w.Code)
+	}
+}
+
+func TestOtterStore_TTL(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewOtterStore(OtterConfig{MaxSize: 10, TTL: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	_ = store.Set(ctx, "k", "v")
+	if v, ok := store.Get(ctx, "k"); !ok || v != "v" {
+		t.Fatalf("expected value before expiry, got %v %v", v, ok)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	if _, ok := store.Get(ctx, "k"); ok {
+		t.Errorf("expected entry to expire after TTL")
+	}
+}
+
+func TestOtterStore_DeleteAndClear(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewOtterStore(OtterConfig{TTL: -1})
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	_ = store.Set(ctx, "a", 1)
+	_ = store.Set(ctx, "b", 2)
+	_ = store.Delete(ctx, "a")
+	if _, ok := store.Get(ctx, "a"); ok {
+		t.Errorf("expected 'a' to be deleted")
+	}
+	_ = store.Clear(ctx)
+	if _, ok := store.Get(ctx, "b"); ok {
+		t.Errorf("expected cache to be cleared")
 	}
 }
