@@ -49,7 +49,7 @@ func main() {
 
     r := app.Router()
 
-    aether.Get(r, "/", func(c *aether.Context[AppState]) {
+    aether.Get(r, "/{$}", func(c *aether.Context[AppState]) {
         c.JSON(http.StatusOK, map[string]string{
             "message": "Hello from Aether!",
             "version": c.Global.Version,

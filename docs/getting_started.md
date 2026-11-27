@@ -33,7 +33,7 @@ func main() {
 
     r := app.Router()
 
-    aether.Get(r, "/", func(c *aether.Context[AppState]) {
+    aether.Get(r, "/{$}", func(c *aether.Context[AppState]) {
         c.JSON(http.StatusOK, map[string]string{
             "message": "Hello, Aether!",
         })
@@ -66,7 +66,10 @@ app.Serve(ctx, listener)                         // existing net.Listener (tests
 |-------------------|--------------------|-------------|--------------------------------------|
 | `Port`            | `int`              | `0`         | Port to listen on                    |
 | `Host`            | `string`           | `""`        | Host address                         |
-| `Timeout`         | `time.Duration`    | `0`         | Request timeout (0 = none)           |
+| `Timeout`         | `time.Duration`    | `0`         | Request context deadline; never cuts the connection (0 = none) |
+| `ReadTimeout`     | `time.Duration`    | `0`         | `http.Server` read timeout (closes the connection) |
+| `WriteTimeout`    | `time.Duration`    | `0`         | `http.Server` write timeout (closes the connection) |
+| `IdleTimeout`     | `time.Duration`    | `120s`      | Keep-alive idle timeout              |
 | `ShutdownTimeout` | `time.Duration`    | `10s`       | Graceful shutdown timeout            |
 | `TLSConfig`       | `*tls.Config`      | `nil`       | TLS settings for `ListenTLS`         |
 | `MaxBodyBytes`    | `int64`            | `2MB`       | Maximum request body size            |
@@ -75,7 +78,7 @@ app.Serve(ctx, listener)                         // existing net.Listener (tests
 | `Template`        | `TemplateEngine`   | `nil`       | Template renderer                    |
 | `Cache`           | `CacheStore`       | `nil`       | Cache backend                        |
 | `Logger`          | `Logger`           | `stdLogger` | Logger implementation                |
-| `Global`          | `T`                | zero value  | Global state accessible in handlers  |
+| `Global`          | `T`                | zero value  | Global state, shared by all requests as `c.Global` (`*T`) |
 | `ErrorHandler`    | `CustomErrorHandler` | `nil`     | Custom panic handler                 |
 
 ## Global State
@@ -100,6 +103,9 @@ aether.Get(r, "/version", func(c *aether.Context[AppState]) {
     c.String(200, c.Global.Version)
 })
 ```
+
+`c.Global` is a `*AppState` pointing to that single value, so changes are seen
+by every request. Use `sync.Mutex` or `sync/atomic` for fields you mutate.
 
 ## Graceful Shutdown
 

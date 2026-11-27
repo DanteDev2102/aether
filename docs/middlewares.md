@@ -25,6 +25,32 @@ api := aether.NewGroup("/api", r)
 api.Use(AuthMiddleware[AppState]())
 ```
 
+**Order rule:** call `Use` on a router before registering routes on it and
+before creating groups from it. A route receives the middlewares its router
+has when the route is registered, and a group copies its parent's middlewares
+when it is created, so a later `Use` could not reach them. Instead of silently
+skipping them, `Use` panics with a clear message in that case.
+
+```go
+r.Use(cors)                       // ok
+api := aether.NewGroup("/api", r)
+api.Use(auth)                     // ok: api has no routes yet
+aether.Get(api, "/users", list)
+r.Use(other)                      // panics: r already has a group
+```
+
+Global middlewares also run for requests that match no route (404, 405 and
+CORS preflights).
+
+### Standard net/http middlewares
+
+`aether.WrapMiddleware` adapts any `func(http.Handler) http.Handler`. If the
+middleware wraps the response writer, the rest of the chain writes through it.
+
+```go
+r.Use(aether.WrapMiddleware[AppState](handlers.CompressHandler))
+```
+
 ## Built-in Middlewares
 
 ### Recovery (auto-applied)

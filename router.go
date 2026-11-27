@@ -1,8 +1,8 @@
 package aether
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,14 +20,28 @@ type Router[T any] struct {
 	log          Logger
 	middlewares  []HandlerFunc[T]
 	ctxPool      *sync.Pool
-	global       T
+	global       *T
 	timeout      time.Duration
 	maxBodyBytes int64
+	sealed       bool
 }
 
-// Use registers one or more middleware handlers.
+// Use registers one or more middleware handlers. Middlewares apply to every
+// route registered on this router and to groups created from it, so Use must
+// be called before registering routes or creating groups; otherwise it panics
+// instead of silently skipping the routes that already exist.
 func (r *Router[T]) Use(middlewares ...HandlerFunc[T]) {
+	if r.sealed {
+		panic(fmt.Sprintf("aether: Use called on router %q after registering routes or creating groups; call Use first", r.prefixOrRoot()))
+	}
 	r.middlewares = append(r.middlewares, middlewares...)
+}
+
+func (r *Router[T]) prefixOrRoot() string {
+	if r.prefix == "" {
+		return "/"
+	}
+	return r.prefix
 }
 
 // ServeHTTP dispatches the request to the matching route. Requests that do not
@@ -46,12 +60,13 @@ func (r *Router[T]) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.mux.ServeHTTP(c.Res(), c.Req())
 	}
 
-	r.serve(w, req, chain)
+	r.serve(w, req, chain, nil)
 }
 
-func (r *Router[T]) serve(w http.ResponseWriter, req *http.Request, chain []HandlerFunc[T]) {
+func (r *Router[T]) serve(w http.ResponseWriter, req *http.Request, chain []HandlerFunc[T], deadline *deadlineCtx) {
 	c := r.ctxPool.Get().(*Context[T])
 	c.reset(w, req, chain, r.json, r.xml, r.template, r.cache, r.log, r.global)
+	c.deadline = deadline
 
 	c.Next()
 
@@ -59,8 +74,12 @@ func (r *Router[T]) serve(w http.ResponseWriter, req *http.Request, chain []Hand
 	r.ctxPool.Put(c)
 }
 
-// NewGroup creates a new router group with the specified prefix.
+// NewGroup creates a new router group with the specified prefix. The group
+// inherits the parent's middlewares; after this call the parent no longer
+// accepts Use.
 func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
+	router.sealed = true
+
 	m := make([]HandlerFunc[T], len(router.middlewares))
 	copy(m, router.middlewares)
 
@@ -96,7 +115,7 @@ func newRouter[T any](conf *Config[T]) *Router[T] {
 				return &Context[T]{}
 			},
 		},
-		global:       conf.Global,
+		global:       &conf.Global,
 		timeout:      conf.Timeout,
 		maxBodyBytes: conf.MaxBodyBytes,
 	}
@@ -104,23 +123,25 @@ func newRouter[T any](conf *Config[T]) *Router[T] {
 
 func registerHelper[T any](r *Router[T], method, path string, finalHandler HandlerFunc[T]) {
 	fullPath := method + " " + r.prefix + path
+	r.sealed = true
 
 	chain := make([]HandlerFunc[T], len(r.middlewares)+1)
 	copy(chain, r.middlewares)
 	chain[len(r.middlewares)] = finalHandler
 
 	r.mux.HandleFunc(fullPath, func(w http.ResponseWriter, req *http.Request) {
+		var deadline *deadlineCtx
 		if r.timeout > 0 {
-			ctx, cancel := context.WithTimeout(req.Context(), r.timeout)
-			defer cancel()
-			req = req.WithContext(ctx)
+			deadline = newDeadlineCtx(req.Context(), r.timeout)
+			defer deadline.finish()
+			req = req.WithContext(deadline)
 		}
 
 		if r.maxBodyBytes > 0 {
 			req.Body = http.MaxBytesReader(w, req.Body, r.maxBodyBytes)
 		}
 
-		r.serve(w, req, chain)
+		r.serve(w, req, chain, deadline)
 	})
 }
 

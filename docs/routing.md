@@ -1,6 +1,17 @@
 # Routing
 
-Aether uses Go 1.22+ `http.ServeMux` for pattern matching, supporting path parameters natively.
+Aether uses Go's `http.ServeMux` for pattern matching, supporting path parameters natively.
+
+> **Note on `/`:** in `http.ServeMux` a pattern ending in `/` matches every path
+> under it, so `aether.Get(r, "/", h)` also answers `/anything` with 200 instead
+> of 404. Use `"/{$}"` to match only the root path.
+
+```go
+aether.Get(r, "/{$}", home)   // only "/"
+aether.Get(r, "/", fallback)  // "/" and every unmatched GET path
+```
+
+Registering the same method and pattern twice panics at startup.
 
 ## HTTP Methods
 
@@ -34,7 +45,8 @@ aether.Get(r, "/files/{path...}", func(c *aether.Context[T]) {
 
 ## Route Groups
 
-Groups share a common prefix and middleware chain:
+Groups share a common prefix and inherit the middlewares of their parent at
+creation time:
 
 ```go
 api := aether.NewGroup("/api/v1", r)
@@ -68,6 +80,13 @@ aether.Post[AppState, CreateUser](r, "/users", func(c *aether.Context[AppState],
 ```
 
 Supports: `application/json`, `application/xml`, `application/x-www-form-urlencoded`, `multipart/form-data`.
+
+- An empty body is valid and yields the zero value of the body type.
+- Malformed bodies, and form values that do not fit the field type (`age=abc`
+  for an `int`), get a `400`; bodies over `MaxBodyBytes` get a `413`.
+- Form fields are matched by the `form` tag, then the `json` tag (options such
+  as `,omitempty` are ignored, `-` skips the field), then the lowercase field
+  name. Slice fields receive every value (`?tag=a&tag=b`).
 
 ## Static Files
 

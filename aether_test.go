@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -773,5 +775,247 @@ func TestNewSlogLogger_WritesThroughHandler(t *testing.T) {
 
 	if NewSlogLogger(nil) == nil {
 		t.Errorf("expected a logger for nil input")
+	}
+}
+
+func TestRouterUse_PanicsAfterRoutes(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Get(r, "/x", func(c *Context[testGlobal]) {})
+
+	defer func() {
+		if recover() == nil {
+			t.Errorf("expected Use after registering a route to panic")
+		}
+	}()
+	r.Use(func(c *Context[testGlobal]) { c.Next() })
+}
+
+func TestRouterUse_PanicsAfterCreatingGroup(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	api := NewGroup("/api", r)
+	api.Use(func(c *Context[testGlobal]) { c.Next() }) // the group itself is still open
+
+	defer func() {
+		if recover() == nil {
+			t.Errorf("expected Use on parent after creating a group to panic")
+		}
+	}()
+	r.Use(func(c *Context[testGlobal]) { c.Next() })
+}
+
+func TestGlobal_IsSharedPointer(t *testing.T) {
+	app := New(&Config[testGlobal]{Global: testGlobal{AppName: "orig"}})
+	r := app.Router()
+	Get(r, "/set", func(c *Context[testGlobal]) {
+		c.Global.AppName = "changed"
+	})
+	Get(r, "/get", func(c *Context[testGlobal]) {
+		_ = c.String(http.StatusOK, c.Global.AppName)
+	})
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), "GET", "/set", nil))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), "GET", "/get", nil))
+
+	if w.Body.String() != "changed" {
+		t.Errorf("expected Global mutation to persist, got %q", w.Body.String())
+	}
+}
+
+func TestContextCopy_UsableAfterRequest(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	got := make(chan string, 1)
+	Get(r, "/users/{id}", func(c *Context[testGlobal]) {
+		cp := c.Copy()
+		go func() {
+			time.Sleep(20 * time.Millisecond) // the request has finished by now
+			if cp.Req().Context().Err() != nil {
+				got <- "context canceled"
+				return
+			}
+			if _, err := cp.Res().Write([]byte("x")); !errors.Is(err, ErrDetachedContext) {
+				got <- "write did not fail"
+				return
+			}
+			got <- cp.Param("id") + " " + cp.Global.AppName
+		}()
+		_ = c.String(http.StatusOK, "accepted")
+	})
+
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", srv.URL+"/users/7", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	select {
+	case v := <-got:
+		if v != "7 TestApp" {
+			t.Errorf("expected '7 TestApp' from copied context, got %q", v)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("background goroutine did not finish")
+	}
+}
+
+func TestTimeout_DoesNotCutResponse(t *testing.T) {
+	app := New(&Config[testGlobal]{Timeout: 30 * time.Millisecond, Logger: NewLogger(LogConfig{})})
+	Get(app.Router(), "/slow", func(c *Context[testGlobal]) {
+		time.Sleep(80 * time.Millisecond) // ignores the deadline on purpose
+		_ = c.String(http.StatusOK, "finished")
+	})
+
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = app.Serve(ctx, ln) }()
+
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://"+ln.Addr().String()+"/slow", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request was cut: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "finished" {
+		t.Errorf("expected full response, got %q", body)
+	}
+}
+
+func TestSSE_ClearsTimeoutAndTracksStatus(t *testing.T) {
+	app := New(&Config[testGlobal]{Timeout: 30 * time.Millisecond})
+	var ctxErr error
+	var status int
+	Get(app.Router(), "/events", func(c *Context[testGlobal]) {
+		rc, err := c.SSE()
+		if err != nil {
+			t.Errorf("SSE: %v", err)
+			return
+		}
+		for i := 0; i < 3; i++ {
+			_, _ = io.WriteString(c.Res(), "data: tick\n\n")
+			_ = rc.Flush()
+			time.Sleep(25 * time.Millisecond)
+		}
+		ctxErr = c.Req().Context().Err()
+		status = c.Res().(ResponseWriter).Status()
+	})
+
+	srv := httptest.NewServer(app.Router())
+	defer srv.Close()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", srv.URL+"/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if ctxErr != nil {
+		t.Errorf("expected SSE to clear the request timeout, context error: %v", ctxErr)
+	}
+	if status != http.StatusOK || strings.Count(string(body), "tick") != 3 {
+		t.Errorf("expected status 200 and 3 events, got %d and %q", status, body)
+	}
+}
+
+func TestTimeout_ClientDisconnectStillCancels(t *testing.T) {
+	app := New(&Config[testGlobal]{Timeout: time.Minute})
+	canceled := make(chan struct{})
+	Get(app.Router(), "/wait", func(c *Context[testGlobal]) {
+		c.ClearTimeout()
+		<-c.Req().Context().Done()
+		close(canceled)
+	})
+
+	srv := httptest.NewServer(app.Router())
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/wait", nil)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		_ = resp.Body.Close()
+	}
+
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("client disconnect did not cancel the request context")
+	}
+}
+
+type upperWriter struct{ http.ResponseWriter }
+
+func (u *upperWriter) Write(b []byte) (int, error) { return u.ResponseWriter.Write(bytes.ToUpper(b)) }
+
+func TestWrapMiddleware_HonorsReplacedWriter(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	var status int
+	r.Use(func(c *Context[testGlobal]) {
+		c.Next()
+		status = c.Res().(ResponseWriter).Status()
+	})
+	r.Use(WrapMiddleware[testGlobal](func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(&upperWriter{w}, req)
+		})
+	}))
+	Get(r, "/w", func(c *Context[testGlobal]) { _ = c.String(http.StatusCreated, "abc") })
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), "GET", "/w", nil))
+
+	if w.Body.String() != "ABC" {
+		t.Errorf("expected body written through the wrapped writer, got %q", w.Body.String())
+	}
+	if status != http.StatusCreated {
+		t.Errorf("expected outer middleware to see status %d, got %d", http.StatusCreated, status)
+	}
+}
+
+func TestFormBind_InvalidValueAndTags(t *testing.T) {
+	type form struct {
+		Name string   `json:"name,omitempty"`
+		Age  int      `form:"age"`
+		Tags []string `form:"tag"`
+		IDs  []int    `form:"id"`
+		Skip string   `json:"-"`
+	}
+	app := newTestApp()
+	r := app.Router()
+	Post(r, "/f", func(c *Context[testGlobal], f form) { _ = c.JSON(http.StatusOK, f) })
+
+	send := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/f", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send("name=ana&age=30&tag=a&tag=b&id=1&id=2&Skip=x")
+	want := `{"name":"ana","Age":30,"Tags":["a","b"],"IDs":[1,2]}`
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != want {
+		t.Errorf("expected %s, got %d %s", want, w.Code, w.Body.String())
+	}
+
+	for _, bad := range []string{"age=abc", "id=1&id=x", "age=99999999999999999999"} {
+		if w := send(bad); w.Code != http.StatusBadRequest {
+			t.Errorf("%q: expected status %d, got %d", bad, http.StatusBadRequest, w.Code)
+		}
 	}
 }

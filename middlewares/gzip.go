@@ -64,6 +64,9 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 // Flush flushes compressed data to the client, which keeps streaming responses
 // such as Server-Sent Events working.
 func (g *gzipResponseWriter) Flush() {
+	if !g.wroteHeader {
+		g.WriteHeader(http.StatusOK)
+	}
 	if g.gw != nil {
 		_ = g.gw.Flush()
 	}
