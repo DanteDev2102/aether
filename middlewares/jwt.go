@@ -2,6 +2,7 @@ package middlewares
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,10 @@ type contextKey string
 
 // ClaimsContextKey is the context key for storing JWT claims.
 const ClaimsContextKey contextKey = "aether_jwt_claims"
+
+// ErrMissingToken is passed to JWTConfig.ErrorHandler when the request carries
+// no token.
+var ErrMissingToken = errors.New("aether/middlewares: missing JWT token")
 
 // JWTValidator defines the interface for JWT token validation.
 type JWTValidator interface {
@@ -42,13 +47,19 @@ func (v *defaultJWTValidator) Validate(tokenString string) (jwt.Claims, error) {
 }
 
 // JWTConfig holds configuration for JWT authentication middleware.
-type JWTConfig struct {
+type JWTConfig[T any] struct {
+	// Secret is the HMAC key used by the default validator. It is required
+	// unless Validator is set.
 	Secret        []byte
 	SigningMethod jwt.SigningMethod
 	ClaimsFunc    func() jwt.Claims
 	Validator     JWTValidator
-	TokenLookup   string
-	ErrorHandler  func(c *aether.Context[any], err error)
+	// TokenLookup is "<source>:<name>" where source is header, query or
+	// cookie. Defaults to "header:Authorization".
+	TokenLookup string
+	// ErrorHandler writes the response when the token is missing or invalid.
+	// It receives the request context; without it a 401 JSON is sent.
+	ErrorHandler func(c *aether.Context[T], err error)
 }
 
 func extractToken(req *http.Request, lookup string) string {
@@ -60,8 +71,11 @@ func extractToken(req *http.Request, lookup string) string {
 	switch parts[0] {
 	case "header":
 		val := req.Header.Get(parts[1])
-		if parts[1] == "Authorization" && strings.HasPrefix(val, "Bearer ") {
-			return strings.TrimPrefix(val, "Bearer ")
+		if strings.EqualFold(parts[1], "Authorization") {
+			scheme, token, ok := strings.Cut(val, " ")
+			if ok && strings.EqualFold(scheme, "Bearer") {
+				return strings.TrimSpace(token)
+			}
 		}
 		return val
 	case "query":
@@ -77,9 +91,14 @@ func extractToken(req *http.Request, lookup string) string {
 }
 
 // JWTMiddleware provides JWT token validation and authentication.
-func JWTMiddleware[T any](cfg JWTConfig) aether.HandlerFunc[T] {
+//
+// It panics when neither Secret nor Validator is configured.
+func JWTMiddleware[T any](cfg JWTConfig[T]) aether.HandlerFunc[T] {
 	validator := cfg.Validator
 	if validator == nil {
+		if len(cfg.Secret) == 0 {
+			panic("aether/middlewares: JWTMiddleware requires a Secret or a Validator")
+		}
 		signingMethod := cfg.SigningMethod
 		if signingMethod == nil {
 			signingMethod = jwt.SigningMethodHS256
@@ -100,28 +119,24 @@ func JWTMiddleware[T any](cfg JWTConfig) aether.HandlerFunc[T] {
 		lookup = "header:Authorization"
 	}
 
+	fail := func(c *aether.Context[T], err error, msg string) {
+		if cfg.ErrorHandler != nil {
+			cfg.ErrorHandler(c, err)
+			return
+		}
+		_ = c.JSON(http.StatusUnauthorized, map[string]string{"error": msg})
+	}
+
 	return func(c *aether.Context[T]) {
 		tokenString := extractToken(c.Req(), lookup)
 		if tokenString == "" {
-			if cfg.ErrorHandler != nil {
-				cfg.ErrorHandler(&aether.Context[any]{}, jwt.ErrTokenMalformed)
-			} else {
-				_ = c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "Missing or invalid token",
-				})
-			}
+			fail(c, ErrMissingToken, "Missing or invalid token")
 			return
 		}
 
 		claims, err := validator.Validate(tokenString)
 		if err != nil {
-			if cfg.ErrorHandler != nil {
-				cfg.ErrorHandler(&aether.Context[any]{}, err)
-			} else {
-				_ = c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "Invalid or expired token",
-				})
-			}
+			fail(c, err, "Invalid or expired token")
 			return
 		}
 

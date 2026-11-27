@@ -141,7 +141,7 @@ r.Use(middlewares.RateLimiterMiddleware[AppState](middlewares.RateLimiterConfig{
 }))
 
 // JWT Authentication
-r.Use(middlewares.JWTMiddleware[AppState](middlewares.JWTConfig{
+r.Use(middlewares.JWTMiddleware[AppState](middlewares.JWTConfig[AppState]{
     Secret: []byte("your-secret-key"),
 }))
 

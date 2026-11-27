@@ -49,6 +49,8 @@ r.Use(middlewares.CORSMiddleware[T](middlewares.CORSConfig{
 }))
 ```
 
+Only the request's `Origin` is echoed back when it is in `AllowOrigins` (with `Vary: Origin`). An empty list or `"*"` allows any origin, but combining a wildcard with `AllowCredentials: true` panics at startup because browsers reject it; list the origins or use `AllowOriginFunc` instead. Preflight requests (`OPTIONS` with `Access-Control-Request-Method`) are answered with `204` even for routes that only register other methods.
+
 ### Helmet (Security Headers)
 ```go
 r.Use(middlewares.HelmetMiddleware[T](middlewares.DefaultHelmetConfig()))
@@ -79,10 +81,20 @@ r.Use(middlewares.RateLimiterMiddleware[T](middlewares.RateLimiterConfig{
 
 ### JWT Authentication
 ```go
-r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig{
+r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig[T]{
     Secret:      []byte("your-secret"),
     TokenLookup: "header:Authorization",  // or "query:token" or "cookie:jwt"
 }))
+
+// Custom error response (receives the real request context):
+r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig[T]{
+    Secret: []byte("your-secret"),
+    ErrorHandler: func(c *aether.Context[T], err error) {
+        _ = c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
+    },
+}))
+
+// JWTMiddleware panics at startup when neither Secret nor Validator is set.
 
 // Access claims in handler:
 claims := middlewares.GetMapClaims(c)
@@ -97,7 +109,7 @@ func (v *MyValidator) Validate(tokenString string) (jwt.Claims, error) {
     // Your custom validation logic
 }
 
-r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig{
+r.Use(middlewares.JWTMiddleware[T](middlewares.JWTConfig[T]{
     Validator: &MyValidator{},
 }))
 ```
