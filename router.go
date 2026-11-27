@@ -2,6 +2,7 @@ package aether
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -123,6 +124,27 @@ func registerHelper[T any](r *Router[T], method, path string, finalHandler Handl
 	})
 }
 
+// bindBody adapts a HandlerWithBody into a HandlerFunc that decodes the request
+// body before calling h. An empty body yields the zero value of B. Bodies over
+// the configured size limit get 413 and malformed bodies get 400.
+func bindBody[T, B any](h HandlerWithBody[T, B]) HandlerFunc[T] {
+	return func(c *Context[T]) {
+		var body B
+		if err := c.Bind(&body); err != nil {
+			status := http.StatusBadRequest
+			msg := "Invalid request body"
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				status = http.StatusRequestEntityTooLarge
+				msg = "Request body too large"
+			}
+			_ = c.JSON(status, map[string]string{"error": msg})
+			return
+		}
+		h(c, body)
+	}
+}
+
 // Get registers a handler for GET requests at the specified path.
 func Get[T any](r *Router[T], path string, h HandlerFunc[T]) {
 	registerHelper(r, "GET", path, h)
@@ -135,38 +157,17 @@ func Delete[T any](r *Router[T], path string, h HandlerFunc[T]) {
 
 // Post registers a handler for POST requests at the specified path.
 func Post[T, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
-	registerHelper(r, "POST", path, func(c *Context[T]) {
-		var body B
-		if err := c.Bind(&body); err != nil {
-			http.Error(c.Res(), "Aether: Invalid Request Body", http.StatusBadRequest)
-			return
-		}
-		h(c, body)
-	})
+	registerHelper(r, "POST", path, bindBody(h))
 }
 
 // Put registers a handler for PUT requests at the specified path.
 func Put[T, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
-	registerHelper(r, "PUT", path, func(c *Context[T]) {
-		var body B
-		if err := c.Bind(&body); err != nil {
-			http.Error(c.Res(), "Aether: Invalid Request Body", http.StatusBadRequest)
-			return
-		}
-		h(c, body)
-	})
+	registerHelper(r, "PUT", path, bindBody(h))
 }
 
 // Patch registers a handler for PATCH requests at the specified path.
 func Patch[T, B any](r *Router[T], path string, h HandlerWithBody[T, B]) {
-	registerHelper(r, "PATCH", path, func(c *Context[T]) {
-		var body B
-		if err := c.Bind(&body); err != nil {
-			http.Error(c.Res(), "Aether: Invalid Request Body", http.StatusBadRequest)
-			return
-		}
-		h(c, body)
-	})
+	registerHelper(r, "PATCH", path, bindBody(h))
 }
 
 // Head registers a handler for HEAD requests at the specified path.

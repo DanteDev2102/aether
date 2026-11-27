@@ -101,7 +101,7 @@ func TestContextString(t *testing.T) {
 	r := app.Router()
 
 	Get(r, "/text", func(c *Context[testGlobal]) {
-		_ = c.String(http.StatusOK, "Hello %s", "Aether")
+		_ = c.Stringf(http.StatusOK, "Hello %s", "Aether")
 	})
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/text", nil)
@@ -123,7 +123,7 @@ func TestQueryParam(t *testing.T) {
 
 	Get(r, "/search", func(c *Context[testGlobal]) {
 		q := c.Query("q")
-		_ = c.String(http.StatusOK, "search: %s", q)
+		_ = c.Stringf(http.StatusOK, "search: %s", q)
 	})
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/search?q=aether", nil)
@@ -142,7 +142,7 @@ func TestPathParam(t *testing.T) {
 
 	Get(r, "/users/{id}", func(c *Context[testGlobal]) {
 		id := c.Param("id")
-		_ = c.String(http.StatusOK, "user: %s", id)
+		_ = c.Stringf(http.StatusOK, "user: %s", id)
 	})
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/users/42", nil)
@@ -205,7 +205,7 @@ func TestGlobalAccess(t *testing.T) {
 	r := app.Router()
 
 	Get(r, "/global", func(c *Context[testGlobal]) {
-		_ = c.String(http.StatusOK, "%s", c.Global.AppName)
+		_ = c.Stringf(http.StatusOK, "%s", c.Global.AppName)
 	})
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/global", nil)
@@ -237,7 +237,7 @@ func TestCookies(t *testing.T) {
 			_ = c.String(http.StatusBadRequest, "no cookie")
 			return
 		}
-		_ = c.String(http.StatusOK, "%s", cookie.Value)
+		_ = c.Stringf(http.StatusOK, "%s", cookie.Value)
 	})
 
 	// Test set cookie
@@ -271,7 +271,7 @@ func TestRenderWithoutTemplate(t *testing.T) {
 	Get(r, "/render", func(c *Context[testGlobal]) {
 		err := c.Render(http.StatusOK, "index", nil)
 		if err != nil {
-			_ = c.String(http.StatusInternalServerError, "%s", err.Error())
+			_ = c.Stringf(http.StatusInternalServerError, "%s", err.Error())
 		}
 	})
 
@@ -385,7 +385,7 @@ func TestCacheAccessor(t *testing.T) {
 			_ = c.String(http.StatusNotFound, "not found")
 			return
 		}
-		_ = c.String(http.StatusOK, "%s", val.(string))
+		_ = c.Stringf(http.StatusOK, "%s", val.(string))
 	})
 
 	// Set cache
@@ -495,4 +495,132 @@ func TestGroupRoutes_ConcurrentRequests(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestContextString_IsLiteral(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Get(r, "/pct", func(c *Context[testGlobal]) {
+		_ = c.String(http.StatusOK, "100%")
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/pct", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Body.String() != "100%" {
+		t.Errorf("expected body '100%%', got '%s'", w.Body.String())
+	}
+}
+
+func TestPostRoute_EmptyBody(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Post(r, "/logout", func(c *Context[testGlobal], _ struct{}) {
+		_ = c.String(http.StatusOK, "bye")
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/logout", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestPostRoute_InvalidBody(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Post(r, "/users", func(c *Context[testGlobal], _ struct{ Name string }) {
+		_ = c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/users", bytes.NewBufferString("{bad"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected JSON error, got Content-Type %q", ct)
+	}
+}
+
+func TestPostRoute_BodyTooLarge(t *testing.T) {
+	app := New(&Config[testGlobal]{MaxBodyBytes: 8})
+	r := app.Router()
+	Post(r, "/users", func(c *Context[testGlobal], _ struct{ Name string }) {
+		_ = c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/users", bytes.NewBufferString(`{"Name":"a very long name"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected status %d, got %d", http.StatusRequestEntityTooLarge, w.Code)
+	}
+}
+
+func TestContextJSON_EncodeErrorWritesNothing(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	var encErr error
+	Get(r, "/bad", func(c *Context[testGlobal]) {
+		encErr = c.JSON(http.StatusOK, map[string]any{"ch": make(chan int)})
+		if encErr != nil {
+			_ = c.String(http.StatusInternalServerError, "encode failed")
+		}
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/bad", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if encErr == nil {
+		t.Fatalf("expected an encoding error")
+	}
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestRecoveryMiddleware_DoesNotLeakPanic(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Get(r, "/boom", func(_ *Context[testGlobal]) {
+		panic("db password=secret")
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/boom", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("secret")) {
+		t.Errorf("panic value leaked to client: %s", w.Body.String())
+	}
+}
+
+func TestRecoveryMiddleware_AfterPartialWrite(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Get(r, "/half", func(c *Context[testGlobal]) {
+		_ = c.String(http.StatusOK, "partial")
+		panic("late failure")
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/half", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Body.String() != "partial" {
+		t.Errorf("expected body to stay 'partial', got '%s'", w.Body.String())
+	}
 }

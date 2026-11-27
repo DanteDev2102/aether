@@ -28,7 +28,7 @@ api.Use(AuthMiddleware[AppState]())
 ## Built-in Middlewares
 
 ### Recovery (auto-applied)
-Catches panics and returns a 500 response. Configured via `Config.ErrorHandler`.
+Catches panics and returns a generic 500 JSON response (the panic value is logged, never sent to the client). Configured via `Config.ErrorHandler`.
 
 ### Logger (auto-applied)
 Logs method, path, status code, and duration for every request.
