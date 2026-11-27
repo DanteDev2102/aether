@@ -125,9 +125,47 @@ c.Log().Errorf("Error: %v", err)
 
 ## Global State
 
+`c.Global` is a pointer to the single `Config.Global` value shared by the whole
+app. Changes persist across requests, so protect mutable fields:
+
 ```go
 dbConn := c.Global.DB       // Access typed global state
 version := c.Global.Version
+
+type AppState struct {
+    Hits atomic.Int64       // safe to mutate concurrently
+}
+c.Global.Hits.Add(1)
+```
+
+## Background Work (Copy)
+
+The `Context` is reused for later requests once the handler returns, so do not
+keep it or use it from goroutines. Use `c.Copy()` instead: the copy keeps the
+request (its context is no longer canceled when the request ends), path
+parameters, `Global`, logger and cache, but it cannot write a response
+(`ErrDetachedContext`) and the request body must not be read from it.
+
+```go
+aether.Post[T, Order](r, "/orders", func(c *aether.Context[T], o Order) {
+    cp := c.Copy()
+    go func() {
+        sendConfirmationEmail(cp.Req().Context(), o)
+        cp.Log().Infof("email sent for order %s", cp.Param("id"))
+    }()
+    _ = c.JSON(202, map[string]string{"status": "accepted"})
+})
+```
+
+## Timeouts
+
+`Config.Timeout` sets a deadline on `c.Req().Context()`; it never cuts the
+connection. Pass that context to databases and HTTP clients so they stop when
+it expires. For long responses, drop the deadline (client disconnects still
+cancel the context):
+
+```go
+c.ClearTimeout()  // c.SSE() does this automatically
 ```
 
 ## Timing

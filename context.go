@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -63,6 +64,16 @@ func (rw *responseWriter) Size() int {
 	return rw.size
 }
 
+// Flush sends any buffered data to the client. It records an implicit 200
+// status first, so streaming responses report the right status and do not
+// trigger a duplicate WriteHeader.
+func (rw *responseWriter) Flush() {
+	if rw.status == 0 {
+		rw.WriteHeader(http.StatusOK)
+	}
+	_ = http.NewResponseController(rw.ResponseWriter).Flush()
+}
+
 // Written reports whether the response status has already been sent.
 func (rw *responseWriter) Written() bool {
 	return rw.status != 0
@@ -74,8 +85,11 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 }
 
 // Context holds the request context for a handler.
+//
+// A Context is reused for later requests once the handler chain returns, so it
+// must not be kept or used from goroutines after that; use Copy instead.
 type Context[T any] struct {
-	ctx      context.Context
+	deadline *deadlineCtx
 	req      *http.Request
 	res      ResponseWriter
 	json     JSONEngine
@@ -86,12 +100,14 @@ type Context[T any] struct {
 	handlers []HandlerFunc[T]
 	index    int
 	start    time.Time
-	Global   T
+	// Global points to the application-wide state from Config.Global. It is
+	// shared by all requests: synchronize any mutation (sync.Mutex, atomic).
+	Global *T
 }
 
 // reset initializes the context for a new request.
-func (c *Context[T]) reset(w http.ResponseWriter, req *http.Request, handlers []HandlerFunc[T], json JSONEngine, xml XMLEngine, template TemplateEngine, cache CacheStore, log Logger, global T) {
-	c.ctx = req.Context()
+func (c *Context[T]) reset(w http.ResponseWriter, req *http.Request, handlers []HandlerFunc[T], json JSONEngine, xml XMLEngine, template TemplateEngine, cache CacheStore, log Logger, global *T) {
+	c.deadline = nil
 	c.req = req
 	c.res = &responseWriter{ResponseWriter: w}
 	c.json = json
@@ -108,13 +124,71 @@ func (c *Context[T]) reset(w http.ResponseWriter, req *http.Request, handlers []
 // release drops references held by the context so pooled contexts do not keep
 // requests, responses or global state alive between requests.
 func (c *Context[T]) release() {
-	var zero T
-	c.ctx = nil
+	c.deadline = nil
 	c.req = nil
 	c.res = nil
 	c.handlers = nil
-	c.Global = zero
+	c.Global = nil
 }
+
+// ClearTimeout removes the Config.Timeout deadline from the request context,
+// for responses meant to run longer such as streams, downloads or WebSockets.
+// Client disconnects still cancel the context. It is a no-op when no timeout
+// is configured.
+func (c *Context[T]) ClearTimeout() {
+	if c.deadline != nil {
+		c.deadline.clear()
+	}
+}
+
+// ErrDetachedContext is returned when writing a response from a Context
+// obtained with Copy.
+var ErrDetachedContext = errors.New("aether: cannot write a response from a copied context")
+
+// Copy returns a copy of the context that is safe to use from goroutines and
+// after the handler returns, for example for background work. It keeps the
+// request (whose context is no longer canceled when the request ends), path
+// parameters, Global, logger and cache. It cannot write a response, and the
+// request body must not be read from it.
+func (c *Context[T]) Copy() *Context[T] {
+	return &Context[T]{
+		req:      c.req.WithContext(context.WithoutCancel(c.req.Context())),
+		res:      &detachedWriter{header: http.Header{}},
+		json:     c.json,
+		xml:      c.xml,
+		template: c.template,
+		cache:    c.cache,
+		log:      c.log,
+		start:    c.start,
+		Global:   c.Global,
+	}
+}
+
+// detachedWriter is the response writer of a copied context.
+type detachedWriter struct {
+	header http.Header
+}
+
+// Header returns a header map that is never sent.
+func (d *detachedWriter) Header() http.Header { return d.header }
+
+// Write always fails with ErrDetachedContext.
+func (d *detachedWriter) Write([]byte) (int, error) { return 0, ErrDetachedContext }
+
+// WriteHeader does nothing.
+func (d *detachedWriter) WriteHeader(int) {}
+
+// Status returns 0: a copied context has no response.
+func (d *detachedWriter) Status() int { return 0 }
+
+// Size returns 0.
+func (d *detachedWriter) Size() int { return 0 }
+
+// Written reports true so nothing tries to write a response.
+func (d *detachedWriter) Written() bool { return true }
+
+// Unwrap returns nil: there is no underlying writer.
+func (d *detachedWriter) Unwrap() http.ResponseWriter { return nil }
 
 // Req returns the current HTTP request.
 func (c *Context[T]) Req() *http.Request {
@@ -294,8 +368,10 @@ func (c *Context[T]) Attachment(filepath, filename string) {
 	http.ServeFile(c.res, c.req, filepath)
 }
 
-// SSE prepares the response for Server-Sent Events.
+// SSE prepares the response for Server-Sent Events. It removes the request
+// timeout (see ClearTimeout) so the stream is not cut after Config.Timeout.
 func (c *Context[T]) SSE() (*http.ResponseController, error) {
+	c.ClearTimeout()
 	c.res.Header().Set("Content-Type", "text/event-stream")
 	c.res.Header().Set("Cache-Control", "no-cache")
 	c.res.Header().Set("Connection", "keep-alive")
@@ -324,9 +400,15 @@ func getFormMappings(typ reflect.Type) []formField {
 	var fields []formField
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
-		tag := field.Tag.Get("form")
+		if !field.IsExported() {
+			continue
+		}
+		tag, _, _ := strings.Cut(field.Tag.Get("form"), ",")
 		if tag == "" {
-			tag = field.Tag.Get("json")
+			tag, _, _ = strings.Cut(field.Tag.Get("json"), ",")
+		}
+		if tag == "-" {
+			continue
 		}
 		if tag == "" {
 			tag = strings.ToLower(field.Name)
@@ -395,48 +477,69 @@ func (c *Context[T]) bindForm(v any, isMultipart bool) error {
 	fields := getFormMappings(typ)
 
 	for _, f := range fields {
-		if formValues := c.req.Form[f.Name]; len(formValues) > 0 {
-			fieldValue := elem.Field(f.Index)
-			if fieldValue.CanSet() {
-				c.setFieldValue(fieldValue, formValues[0])
-			}
+		formValues := c.req.Form[f.Name]
+		if len(formValues) == 0 {
+			continue
+		}
+		fieldValue := elem.Field(f.Index)
+		if !fieldValue.CanSet() {
+			continue
+		}
+		if err := setFormField(fieldValue, formValues); err != nil {
+			return fmt.Errorf("aether: invalid value for form field %q: %w", f.Name, err)
 		}
 	}
 	return nil
 }
 
-func (c *Context[T]) setFieldValue(fieldValue reflect.Value, formValue string) {
-	switch fieldValue.Kind() {
-	case reflect.String:
-		fieldValue.SetString(formValue)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if intVal, err := strconv.ParseInt(formValue, 10, 64); err == nil {
-			fieldValue.SetInt(intVal)
-		}
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if uintVal, err := strconv.ParseUint(formValue, 10, 64); err == nil {
-			fieldValue.SetUint(uintVal)
-		}
-	case reflect.Float32, reflect.Float64:
-		if floatVal, err := strconv.ParseFloat(formValue, 64); err == nil {
-			fieldValue.SetFloat(floatVal)
-		}
-	case reflect.Bool:
-		if boolVal, err := strconv.ParseBool(formValue); err == nil {
-			fieldValue.SetBool(boolVal)
-		}
-	case reflect.Slice:
-		c.setSliceValue(fieldValue, formValue)
+// setFormField assigns form values to a struct field. Slices receive every
+// value; other kinds receive the first one.
+func setFormField(field reflect.Value, values []string) error {
+	if field.Kind() != reflect.Slice {
+		return setFormValue(field, values[0])
 	}
+	slice := reflect.MakeSlice(field.Type(), len(values), len(values))
+	for i, v := range values {
+		if err := setFormValue(slice.Index(i), v); err != nil {
+			return err
+		}
+	}
+	field.Set(slice)
+	return nil
 }
 
-func (c *Context[T]) setSliceValue(fieldValue reflect.Value, formValue string) {
-	if fieldValue.Type().Elem().Kind() != reflect.String {
-		return
+// setFormValue parses value into a field of a basic kind. Unsupported kinds
+// are left untouched.
+func setFormValue(field reflect.Value, value string) error {
+	switch field.Kind() {
+	case reflect.String:
+		field.SetString(value)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n, err := strconv.ParseInt(value, 10, field.Type().Bits())
+		if err != nil {
+			return err
+		}
+		field.SetInt(n)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		n, err := strconv.ParseUint(value, 10, field.Type().Bits())
+		if err != nil {
+			return err
+		}
+		field.SetUint(n)
+	case reflect.Float32, reflect.Float64:
+		n, err := strconv.ParseFloat(value, field.Type().Bits())
+		if err != nil {
+			return err
+		}
+		field.SetFloat(n)
+	case reflect.Bool:
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return err
+		}
+		field.SetBool(b)
 	}
-	sliceVal := reflect.MakeSlice(fieldValue.Type(), 1, 1)
-	sliceVal.Index(0).SetString(formValue)
-	fieldValue.Set(sliceVal)
+	return nil
 }
 
 // HandlerFunc is the function signature for HTTP handlers.
@@ -463,13 +566,25 @@ func WithCustomContext[T, L any](initialData L, handler func(c *CustomContext[T,
 }
 
 // WrapMiddleware adapts a standard net/http middleware into an Aether HandlerFunc.
+// When the middleware passes its own http.ResponseWriter to the next handler
+// (to compress, buffer or measure the response), later handlers write through
+// it; the original writer is restored once the chain returns.
 func WrapMiddleware[T any](mw func(http.Handler) http.Handler) HandlerFunc[T] {
 	return func(c *Context[T]) {
+		orig := c.res
 		nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			c.SetReq(r)
+			if w != http.ResponseWriter(orig) {
+				if rw, ok := w.(ResponseWriter); ok {
+					c.SetRes(rw)
+				} else {
+					c.SetRes(&responseWriter{ResponseWriter: w})
+				}
+			}
 			c.Next()
 		})
 
-		mw(nextHandler).ServeHTTP(c.Res(), c.Req())
+		mw(nextHandler).ServeHTTP(orig, c.Req())
+		c.SetRes(orig)
 	}
 }

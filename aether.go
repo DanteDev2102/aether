@@ -15,6 +15,10 @@ import (
 // DefaultMaxBodySize is the default maximum body size for incoming requests.
 const DefaultMaxBodySize = 2 << 20 // 2MB
 
+// DefaultIdleTimeout is how long an idle keep-alive connection stays open,
+// unless Config.IdleTimeout is set.
+const DefaultIdleTimeout = 120 * time.Second
+
 // DefaultShutdownTimeout is how long Listen waits for in-flight requests to
 // finish once its context is canceled, unless Config.ShutdownTimeout is set.
 const DefaultShutdownTimeout = 10 * time.Second
@@ -28,9 +32,18 @@ type TemplateEngine interface {
 type Config[T any] struct {
 	Port int
 	Host string
-	// Timeout bounds each request: it sets the request context deadline and
-	// the server read and write timeouts. Zero means no timeout.
+	// Timeout sets a deadline on each request's context. It never cuts the
+	// connection: handlers and the code they call (database drivers, HTTP
+	// clients) observe it through c.Req().Context() and decide how to stop.
+	// Long-lived responses can drop it with Context.ClearTimeout; SSE does so
+	// automatically. Zero means no deadline.
 	Timeout time.Duration
+	// ReadTimeout, WriteTimeout and IdleTimeout configure the underlying
+	// http.Server. Read and write timeouts close the connection when they
+	// expire and default to none; IdleTimeout defaults to DefaultIdleTimeout.
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	IdleTimeout  time.Duration
 	// ShutdownTimeout is how long graceful shutdown waits for in-flight
 	// requests. Defaults to DefaultShutdownTimeout.
 	ShutdownTimeout time.Duration
@@ -64,6 +77,9 @@ func New[T any](conf *Config[T]) *App[T] {
 	}
 	if conf.Logger == nil {
 		conf.Logger = newStdLogger()
+	}
+	if conf.IdleTimeout == 0 {
+		conf.IdleTimeout = DefaultIdleTimeout
 	}
 	if conf.ShutdownTimeout == 0 {
 		conf.ShutdownTimeout = DefaultShutdownTimeout
@@ -148,17 +164,14 @@ func (a *App[T]) listen(ctx context.Context) (net.Listener, error) {
 }
 
 func (a *App[T]) newServer() *http.Server {
-	srv := &http.Server{
+	return &http.Server{
 		Handler:           a.router,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       a.config.ReadTimeout,
+		WriteTimeout:      a.config.WriteTimeout,
+		IdleTimeout:       a.config.IdleTimeout,
 		TLSConfig:         a.config.TLSConfig,
 	}
-	if t := a.config.Timeout; t > 0 {
-		srv.ReadTimeout = t
-		srv.WriteTimeout = t
-		srv.IdleTimeout = t * 2
-	}
-	return srv
 }
 
 // run starts the cron jobs and the server, waits for ctx to be canceled or the

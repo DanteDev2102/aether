@@ -58,7 +58,7 @@ func main() {
 	r.Use(middlewares.RequestIDMiddleware[AppState]())
 
 	// ─── Public Routes ───────────────────────────────────────────────
-	aether.Get(r, "/", func(c *aether.Context[AppState]) {
+	aether.Get(r, "/{$}", func(c *aether.Context[AppState]) {
 		_ = c.JSON(http.StatusOK, map[string]any{
 			"message": "Welcome to Aether!",
 			"version": c.Global.Version,
