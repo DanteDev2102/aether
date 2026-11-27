@@ -21,7 +21,7 @@ type Router[T any] struct {
 	middlewares  []HandlerFunc[T]
 	ctxPool      *sync.Pool
 	global       T
-	timeout      int
+	timeout      time.Duration
 	maxBodyBytes int64
 }
 
@@ -51,7 +51,7 @@ func (r *Router[T]) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router[T]) serve(w http.ResponseWriter, req *http.Request, chain []HandlerFunc[T]) {
 	c := r.ctxPool.Get().(*Context[T])
-	c.Reset(w, req, chain, r.json, r.xml, r.template, r.cache, r.log, r.global)
+	c.reset(w, req, chain, r.json, r.xml, r.template, r.cache, r.log, r.global)
 
 	c.Next()
 
@@ -80,25 +80,25 @@ func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
 	}
 }
 
-// NewRouter creates a new Router instance with the given configuration.
-func NewRouter[T any](jsonEngine JSONEngine, xmlEngine XMLEngine, templateEngine TemplateEngine, cacheStore CacheStore, log Logger, global T, timeout int, maxBodyBytes int64) *Router[T] {
+// newRouter creates the root Router for an application.
+func newRouter[T any](conf *Config[T]) *Router[T] {
 	return &Router[T]{
 		mux:         http.NewServeMux(),
 		prefix:      "",
-		json:        jsonEngine,
-		xml:         xmlEngine,
-		template:    templateEngine,
-		cache:       cacheStore,
-		log:         log,
+		json:        conf.JSON,
+		xml:         conf.XML,
+		template:    conf.Template,
+		cache:       conf.Cache,
+		log:         conf.Logger,
 		middlewares: make([]HandlerFunc[T], 0),
 		ctxPool: &sync.Pool{
 			New: func() any {
 				return &Context[T]{}
 			},
 		},
-		global:       global,
-		timeout:      timeout,
-		maxBodyBytes: maxBodyBytes,
+		global:       conf.Global,
+		timeout:      conf.Timeout,
+		maxBodyBytes: conf.MaxBodyBytes,
 	}
 }
 
@@ -111,7 +111,7 @@ func registerHelper[T any](r *Router[T], method, path string, finalHandler Handl
 
 	r.mux.HandleFunc(fullPath, func(w http.ResponseWriter, req *http.Request) {
 		if r.timeout > 0 {
-			ctx, cancel := context.WithTimeout(req.Context(), time.Duration(r.timeout)*time.Second)
+			ctx, cancel := context.WithTimeout(req.Context(), r.timeout)
 			defer cancel()
 			req = req.WithContext(ctx)
 		}

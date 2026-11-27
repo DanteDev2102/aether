@@ -27,7 +27,13 @@ go get github.com/DanteDev2102/aether
 package main
 
 import (
+    "context"
+    "log"
     "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+
     "github.com/DanteDev2102/aether"
 )
 
@@ -50,7 +56,12 @@ func main() {
         })
     })
 
-    app.Listen()
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    if err := app.Listen(ctx); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -119,7 +130,7 @@ res := c.Res()
 
 ### Built-in (root package)
 
-Recovery and Logger middlewares are automatically applied.
+Recovery is applied automatically. Request logging is opt-in with `middlewares.LoggerMiddleware`.
 
 ### Middleware Package
 
@@ -180,7 +191,7 @@ app.AddCron("cleanup", 1*time.Hour, func(ctx context.Context, log aether.Logger)
 
 ```go
 // Use the default Otter in-memory cache
-store, _ := aether.NewOtterStore(10000)
+store, _ := aether.NewOtterStore(aether.OtterConfig{MaxSize: 10000})
 
 app := aether.New(&aether.Config[AppState]{
     Cache: store,
@@ -203,7 +214,7 @@ app := aether.New(&aether.Config[AppState]{
     XML:      myCustomXMLEngine{},      // implements XMLEngine
     Template: myHandlebarsEngine{},     // implements TemplateEngine
     Cache:    myRedisStore{},           // implements CacheStore
-    Logger:   myZapLogger{},            // implements Logger
+    Logger:   aether.NewSlogLogger(slog.Default()), // any *slog.Logger, or your own Logger
 })
 ```
 

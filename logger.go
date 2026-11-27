@@ -333,6 +333,17 @@ func NewLogger(cfg LogConfig) Logger {
 	}
 }
 
+// NewSlogLogger adapts any *slog.Logger to the Logger interface, so Aether can
+// log through your own slog handler (JSON, OpenTelemetry, zap, ...). Sync is
+// a no-op; flush your handler yourself if it buffers. A nil logger uses
+// slog.Default().
+func NewSlogLogger(l *slog.Logger) Logger {
+	if l == nil {
+		l = slog.Default()
+	}
+	return stdLogger{l: l}
+}
+
 func newStdLogger() Logger {
 	return NewLogger(LogConfig{
 		Stdout: true,

@@ -18,7 +18,10 @@ type CacheStore interface {
 Aether ships with a default in-memory cache powered by [Otter](https://github.com/maypok86/otter), an extremely fast concurrent cache for Go.
 
 ```go
-store, err := aether.NewOtterStore(10000)  // max 10,000 entries
+store, err := aether.NewOtterStore(aether.OtterConfig{
+    MaxSize: 10000,            // default 10,000 entries
+    TTL:     10 * time.Minute, // default 5m; negative disables expiration
+})
 if err != nil {
     panic(err)
 }

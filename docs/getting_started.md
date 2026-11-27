@@ -6,7 +6,7 @@
 go get github.com/DanteDev2102/aether
 ```
 
-Requires **Go 1.22+** (uses the new `http.ServeMux` pattern matching).
+Requires **Go 1.25+**.
 
 ## Your First App
 
@@ -14,7 +14,13 @@ Requires **Go 1.22+** (uses the new `http.ServeMux` pattern matching).
 package main
 
 import (
+    "context"
+    "log"
     "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+
     "github.com/DanteDev2102/aether"
 )
 
@@ -33,8 +39,25 @@ func main() {
         })
     })
 
-    app.Listen()
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    if err := app.Listen(ctx); err != nil {
+        log.Fatal(err)
+    }
 }
+```
+
+## Starting and stopping
+
+`Listen(ctx)` serves until `ctx` is canceled and then shuts down gracefully,
+waiting up to `ShutdownTimeout` for in-flight requests. It returns an error if
+the address cannot be bound, so nothing calls `os.Exit` behind your back.
+
+```go
+app.Listen(ctx)                                  // HTTP on Host:Port
+app.ListenTLS(ctx, "cert.pem", "key.pem")       // HTTPS
+app.Serve(ctx, listener)                         // existing net.Listener (tests, socket activation)
 ```
 
 ## Configuration
@@ -43,8 +66,9 @@ func main() {
 |-------------------|--------------------|-------------|--------------------------------------|
 | `Port`            | `int`              | `0`         | Port to listen on                    |
 | `Host`            | `string`           | `""`        | Host address                         |
-| `Timeout`         | `int`              | `0`         | Request timeout in seconds           |
-| `ShutdownTimeout` | `int`              | `10`        | Graceful shutdown timeout in seconds |
+| `Timeout`         | `time.Duration`    | `0`         | Request timeout (0 = none)           |
+| `ShutdownTimeout` | `time.Duration`    | `10s`       | Graceful shutdown timeout            |
+| `TLSConfig`       | `*tls.Config`      | `nil`       | TLS settings for `ListenTLS`         |
 | `MaxBodyBytes`    | `int64`            | `2MB`       | Maximum request body size            |
 | `JSON`            | `JSONEngine`       | `std json`  | JSON encoder/decoder                 |
 | `XML`             | `XMLEngine`        | `std xml`   | XML encoder/decoder                  |
@@ -79,4 +103,26 @@ aether.Get(r, "/version", func(c *aether.Context[AppState]) {
 
 ## Graceful Shutdown
 
-Aether automatically handles `SIGINT` and `SIGTERM` signals, gracefully shutting down the HTTP server and stopping all cron jobs before exiting.
+Aether does not install signal handlers itself. Cancel the context passed to
+`Listen` to stop it; `signal.NotifyContext` ties that to `SIGINT`/`SIGTERM`.
+The server then waits up to `ShutdownTimeout` for in-flight requests and stops
+all cron jobs before `Listen` returns.
+
+## Logging
+
+The default logger writes asynchronously to stdout. Configure it with
+`NewLogger`, or plug in any `*slog.Logger` with `NewSlogLogger`:
+
+```go
+// Built-in logger: stdout and/or files, minimum level
+logger := aether.NewLogger(aether.LogConfig{
+    Stdout:    true,
+    FilePaths: []string{"logs/app.log"},
+    Level:     slog.LevelDebug,
+})
+
+// Any slog handler, e.g. JSON
+logger := aether.NewSlogLogger(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+app := aether.New(&aether.Config[AppState]{Logger: logger})
+```

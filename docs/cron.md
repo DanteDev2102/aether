@@ -32,10 +32,10 @@ app.AddCron("sync-data", 1*time.Hour, func(ctx context.Context, log aether.Logge
 ## Behavior
 
 - Jobs execute **immediately on startup**, then repeat at the configured interval.
-- Jobs must be added **before** calling `app.Listen()`.
+- Jobs must be added **before** calling `app.Listen(ctx)`.
 - Each job runs in its own goroutine.
 - Panics in cron jobs are **recovered** automatically and logged.
-- On shutdown (`SIGINT`/`SIGTERM`), all cron jobs are gracefully stopped before the server shuts down.
+- When the context passed to `Listen` is canceled, the server shuts down gracefully and then all cron jobs are stopped.
 
 ## Context Cancellation
 

@@ -95,7 +95,7 @@ import (
 
 ### Naming Conventions
 
-- **Exported types/functions**: PascalCase (e.g., `App`, `NewRouter`, `Get`)
+- **Exported types/functions**: PascalCase (e.g., `App`, `NewGroup`, `Get`)
 - **Unexported types/functions**: camelCase (e.g., `registerHelper`, `responseWriter`)
 - **Interfaces**: PascalCase with descriptive names (e.g., `CacheStore`, `JSONEngine`, `Logger`)
 - **Config structs**: `<Feature>Config` suffix (e.g., `JWTConfig`, `CORSConfig`)
@@ -223,7 +223,7 @@ Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `buil
 ## Technical Stack
 
 - **Go**: 1.25.0
-- **Dependencies**: `golang-jwt/jwt/v5`, `google/uuid`, `maypok86/otter`
+- **Dependencies**: `golang-jwt/jwt/v5`, `google/uuid`, `maypok86/otter/v2`
 - **Dev tools**: golangci-lint, govulncheck, go-task, lefthook, air
 
 ## Pre-commit Hooks

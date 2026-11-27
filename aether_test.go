@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type testGlobal struct {
@@ -358,7 +363,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 }
 
 func TestCacheAccessor(t *testing.T) {
-	store, err := NewOtterStore(100)
+	store, err := NewOtterStore(OtterConfig{MaxSize: 100})
 	if err != nil {
 		t.Fatalf("failed to create otter store: %v", err)
 	}
@@ -622,5 +627,151 @@ func TestRecoveryMiddleware_AfterPartialWrite(t *testing.T) {
 
 	if w.Body.String() != "partial" {
 		t.Errorf("expected body to stay 'partial', got '%s'", w.Body.String())
+	}
+}
+
+func newQuietApp() *App[testGlobal] {
+	return New(&Config[testGlobal]{
+		Host:            "127.0.0.1",
+		ShutdownTimeout: time.Second,
+		Logger:          NewLogger(LogConfig{}),
+	})
+}
+
+func TestServe_ShutsDownOnContextCancel(t *testing.T) {
+	app := newQuietApp()
+	Get(app.Router(), "/ping", func(c *Context[testGlobal]) {
+		_ = c.String(http.StatusOK, "pong")
+	})
+
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	var cronRuns atomic.Int32
+	app.AddCron("tick", time.Hour, func(_ context.Context, _ Logger) { cronRuns.Add(1) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- app.Serve(ctx, ln) }()
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+ln.Addr().String()+"/ping", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("expected nil error on graceful shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Serve did not return after context cancel")
+	}
+	if cronRuns.Load() != 1 {
+		t.Errorf("expected cron job to run once on start, ran %d times", cronRuns.Load())
+	}
+
+	if err := app.Serve(context.Background(), ln); err == nil {
+		t.Errorf("expected error when serving the same app twice")
+	}
+}
+
+func TestListen_ReturnsErrorWhenPortBusy(t *testing.T) {
+	var lc net.ListenConfig
+	busy, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = busy.Close() }()
+
+	app := newQuietApp()
+	app.config.Port = busy.Addr().(*net.TCPAddr).Port
+
+	if err := app.Listen(context.Background()); err == nil {
+		t.Errorf("expected an error when the port is already in use")
+	}
+}
+
+func TestRequestTimeout_SetsContextDeadline(t *testing.T) {
+	app := New(&Config[testGlobal]{Timeout: 50 * time.Millisecond})
+	Get(app.Router(), "/slow", func(c *Context[testGlobal]) {
+		select {
+		case <-c.Req().Context().Done():
+			_ = c.String(http.StatusGatewayTimeout, "timeout")
+		case <-time.After(time.Second):
+			_ = c.String(http.StatusOK, "late")
+		}
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/slow", nil)
+	w := httptest.NewRecorder()
+	app.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusGatewayTimeout {
+		t.Errorf("expected status %d, got %d", http.StatusGatewayTimeout, w.Code)
+	}
+}
+
+func TestOtterStore_TTL(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewOtterStore(OtterConfig{MaxSize: 10, TTL: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	_ = store.Set(ctx, "k", "v")
+	if v, ok := store.Get(ctx, "k"); !ok || v != "v" {
+		t.Fatalf("expected value before expiry, got %v %v", v, ok)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	if _, ok := store.Get(ctx, "k"); ok {
+		t.Errorf("expected entry to expire after TTL")
+	}
+}
+
+func TestOtterStore_DeleteAndClear(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewOtterStore(OtterConfig{TTL: -1})
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	_ = store.Set(ctx, "a", 1)
+	_ = store.Set(ctx, "b", 2)
+	_ = store.Delete(ctx, "a")
+	if _, ok := store.Get(ctx, "a"); ok {
+		t.Errorf("expected 'a' to be deleted")
+	}
+	_ = store.Clear(ctx)
+	if _, ok := store.Get(ctx, "b"); ok {
+		t.Errorf("expected cache to be cleared")
+	}
+}
+
+func TestNewSlogLogger_WritesThroughHandler(t *testing.T) {
+	var buf bytes.Buffer
+	log := NewSlogLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	log.Infof("hello %s", "aether")
+	log.Debug("dbg")
+	log.Sync()
+
+	out := buf.String()
+	if !strings.Contains(out, "hello aether") || !strings.Contains(out, "level=DEBUG") {
+		t.Errorf("unexpected log output: %q", out)
+	}
+
+	if NewSlogLogger(nil) == nil {
+		t.Errorf("expected a logger for nil input")
 	}
 }

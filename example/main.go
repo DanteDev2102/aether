@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/DanteDev2102/aether"
@@ -26,14 +29,14 @@ type UpdateUserBody struct {
 
 func main() {
 	// Inicializar otter cache
-	cache, err := aether.NewOtterStore(10000)
+	cache, err := aether.NewOtterStore(aether.OtterConfig{MaxSize: 10000})
 	if err != nil {
 		panic(err)
 	}
 
 	app := aether.New(&aether.Config[AppState]{
 		Port:    8080,
-		Timeout: 30,
+		Timeout: 30 * time.Second,
 		Cache:   cache,
 		Logger: aether.NewLogger(aether.LogConfig{
 			Stdout: true,
@@ -193,5 +196,11 @@ func main() {
 	})
 
 	// ─── Start Server ────────────────────────────────────────────────
-	_ = app.Listen()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := app.Listen(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
