@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1017,5 +1019,101 @@ func TestFormBind_InvalidValueAndTags(t *testing.T) {
 		if w := send(bad); w.Code != http.StatusBadRequest {
 			t.Errorf("%q: expected status %d, got %d", bad, http.StatusBadRequest, w.Code)
 		}
+	}
+}
+
+func TestRouter_UnmatchedRoutes(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Get(r, "/items", func(c *Context[testGlobal]) { _ = c.String(http.StatusOK, "list") })
+	Post(r, "/items", func(c *Context[testGlobal], _ struct{}) { _ = c.String(http.StatusCreated, "created") })
+	Get(r, "/dir/", func(c *Context[testGlobal]) { _ = c.String(http.StatusOK, "dir") })
+
+	cases := []struct {
+		method, path string
+		want         int
+		allow        string
+		location     string
+	}{
+		{http.MethodDelete, "/items", http.StatusMethodNotAllowed, "GET, HEAD, POST", ""},
+		{http.MethodHead, "/items", http.StatusOK, "", ""},
+		{http.MethodGet, "/nope", http.StatusNotFound, "", ""},
+		{http.MethodGet, "/dir", http.StatusMovedPermanently, "", "/dir/"},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), tc.method, tc.path, nil))
+		if w.Code != tc.want {
+			t.Errorf("%s %s: expected status %d, got %d", tc.method, tc.path, tc.want, w.Code)
+		}
+		if got := w.Header().Get("Allow"); got != tc.allow {
+			t.Errorf("%s %s: expected Allow %q, got %q", tc.method, tc.path, tc.allow, got)
+		}
+		if got := w.Header().Get("Location"); got != tc.location {
+			t.Errorf("%s %s: expected Location %q, got %q", tc.method, tc.path, tc.location, got)
+		}
+	}
+}
+
+func TestStatic_AtRootCoexistsWithFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("static"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	app := newTestApp()
+	r := app.Router()
+	Static(r, "/", dir)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), "GET", "/a.txt", nil))
+	if w.Code != http.StatusOK || w.Body.String() != "static" {
+		t.Errorf("expected static file, got %d %q", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), "POST", "/a.txt", nil))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+func TestBind_GetBodyBeforeBind(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	type user struct{ Name string }
+	Get(r, "/raw", func(c *Context[testGlobal]) {
+		raw, err := c.GetBody()
+		if err != nil {
+			t.Errorf("GetBody: %v", err)
+		}
+		var u user
+		if err := c.Bind(&u); err != nil {
+			t.Errorf("Bind after GetBody: %v", err)
+		}
+		_ = c.Stringf(http.StatusOK, "%s|%s", raw, u.Name)
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/raw", strings.NewReader(`{"Name":"ana"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Body.String() != `{"Name":"ana"}|ana` {
+		t.Errorf("unexpected body %q", w.Body.String())
+	}
+}
+
+func TestPostRoute_TruncatedJSON(t *testing.T) {
+	app := newTestApp()
+	r := app.Router()
+	Post(r, "/u", func(c *Context[testGlobal], _ struct{ Name string }) { _ = c.String(http.StatusOK, "ok") })
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/u", strings.NewReader(`{"Name":"an`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
 	}
 }

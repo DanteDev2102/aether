@@ -51,6 +51,17 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return size, err
 }
 
+// WriteString writes s without converting it to a byte slice when the
+// underlying writer supports it.
+func (rw *responseWriter) WriteString(s string) (int, error) {
+	if rw.status == 0 {
+		rw.WriteHeader(http.StatusOK)
+	}
+	size, err := io.WriteString(rw.ResponseWriter, s)
+	rw.size += size
+	return size, err
+}
+
 // Status returns the current response status code.
 func (rw *responseWriter) Status() int {
 	if rw.status == 0 {
@@ -100,6 +111,8 @@ type Context[T any] struct {
 	handlers []HandlerFunc[T]
 	index    int
 	start    time.Time
+	// rw is the pooled response writer behind res, reused across requests.
+	rw responseWriter
 	// Global points to the application-wide state from Config.Global. It is
 	// shared by all requests: synchronize any mutation (sync.Mutex, atomic).
 	Global *T
@@ -109,7 +122,8 @@ type Context[T any] struct {
 func (c *Context[T]) reset(w http.ResponseWriter, req *http.Request, handlers []HandlerFunc[T], json JSONEngine, xml XMLEngine, template TemplateEngine, cache CacheStore, log Logger, global *T) {
 	c.deadline = nil
 	c.req = req
-	c.res = &responseWriter{ResponseWriter: w}
+	c.rw = responseWriter{ResponseWriter: w}
+	c.res = &c.rw
 	c.json = json
 	c.xml = xml
 	c.template = template
@@ -127,6 +141,7 @@ func (c *Context[T]) release() {
 	c.deadline = nil
 	c.req = nil
 	c.res = nil
+	c.rw = responseWriter{}
 	c.handlers = nil
 	c.Global = nil
 }
@@ -285,16 +300,16 @@ func (c *Context[T]) Next() {
 // encoded before anything is written, so an encoding error leaves the response
 // untouched and the caller can still send an error response.
 func (c *Context[T]) JSON(status int, data any) error {
-	return c.encoded(status, "application/json", c.json.Encode, data)
+	return c.encoded(status, contentTypeJSON, c.json.Encode, data)
 }
 
 // XML writes an XML response with the specified status code. Like JSON, it
 // encodes the value before writing anything.
 func (c *Context[T]) XML(status int, data any) error {
-	return c.encoded(status, "application/xml", c.xml.Encode, data)
+	return c.encoded(status, contentTypeXML, c.xml.Encode, data)
 }
 
-func (c *Context[T]) encoded(status int, contentType string, encode func(io.Writer, any) error, data any) error {
+func (c *Context[T]) encoded(status int, contentType []string, encode func(io.Writer, any) error, data any) error {
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufPool.Put(buf)
@@ -303,16 +318,25 @@ func (c *Context[T]) encoded(status int, contentType string, encode func(io.Writ
 		return err
 	}
 
-	c.res.Header().Set("Content-Type", contentType)
+	c.res.Header()["Content-Type"] = contentType
 	c.res.WriteHeader(status)
 	_, err := c.res.Write(buf.Bytes())
 	return err
 }
 
+// Shared Content-Type header values. Assigning them directly avoids allocating
+// a new slice per response; net/http only reads them.
+var (
+	contentTypeJSON  = []string{"application/json"}
+	contentTypeXML   = []string{"application/xml"}
+	contentTypePlain = []string{"text/plain; charset=utf-8"}
+	contentTypeHTML  = []string{"text/html; charset=utf-8"}
+)
+
 // String writes text as a plain text response with the specified status code.
 // The text is written as is; use Stringf to format it.
 func (c *Context[T]) String(status int, text string) error {
-	c.res.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	c.res.Header()["Content-Type"] = contentTypePlain
 	c.res.WriteHeader(status)
 	_, err := io.WriteString(c.res, text)
 	return err
@@ -329,7 +353,7 @@ func (c *Context[T]) Render(status int, name string, data any) error {
 	if c.template == nil {
 		return fmt.Errorf("aether: template engine is not configured")
 	}
-	c.res.Header().Set("Content-Type", "text/html; charset=utf-8")
+	c.res.Header()["Content-Type"] = contentTypeHTML
 	c.res.WriteHeader(status)
 	return c.template.Render(c.res, name, data)
 }
@@ -420,6 +444,8 @@ func getFormMappings(typ reflect.Type) []formField {
 }
 
 // Bind binds request body data to the specified struct based on content type.
+// JSON and XML bodies are decoded as they are read, so the body is consumed;
+// call GetBody first if the raw body is also needed.
 func (c *Context[T]) Bind(v any) error {
 	contentType := c.req.Header.Get("Content-Type")
 
@@ -438,24 +464,27 @@ func (c *Context[T]) Bind(v any) error {
 	return c.bindJSON(v)
 }
 
-// bindJSON decodes the JSON body into v. An empty body is not an error and
-// leaves v unchanged.
+// bindJSON decodes the JSON body into v, streaming from the request body. An
+// empty body is not an error and leaves v unchanged.
 func (c *Context[T]) bindJSON(v any) error {
-	body, err := c.GetBody()
-	if err != nil || len(body) == 0 {
-		return err
-	}
-	return c.json.Decode(bytes.NewReader(body), v)
+	return c.decodeBody(c.json.Decode, v)
 }
 
-// bindXML decodes the XML body into v. An empty body is not an error and
-// leaves v unchanged.
+// bindXML decodes the XML body into v, streaming from the request body. An
+// empty body is not an error and leaves v unchanged.
 func (c *Context[T]) bindXML(v any) error {
-	body, err := c.GetBody()
-	if err != nil || len(body) == 0 {
+	return c.decodeBody(c.xml.Decode, v)
+}
+
+func (c *Context[T]) decodeBody(decode func(io.Reader, any) error, v any) error {
+	body := c.req.Body
+	if body == nil || body == http.NoBody {
+		return nil
+	}
+	if err := decode(body, v); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	return c.xml.Decode(bytes.NewReader(body), v)
+	return nil
 }
 
 func (c *Context[T]) bindForm(v any, isMultipart bool) error {

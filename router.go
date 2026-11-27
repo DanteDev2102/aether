@@ -49,18 +49,47 @@ func (r *Router[T]) prefixOrRoot() string {
 // middlewares before the default response is written, so global middlewares
 // such as CORS or recovery apply to them as well.
 func (r *Router[T]) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if _, pattern := r.mux.Handler(req); pattern != "" || len(r.middlewares) == 0 {
-		r.mux.ServeHTTP(w, req)
-		return
-	}
+	r.mux.ServeHTTP(w, req)
+}
 
+// fallbackPattern matches every method and path with the lowest precedence in
+// http.ServeMux, so it only receives requests no route matched. Handling them
+// here keeps a single route lookup per request.
+const fallbackPattern = "/"
+
+var routeMethods = []string{
+	http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch,
+	http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace,
+}
+
+// serveUnmatched runs the root middlewares for a request that matched no
+// route, then answers 405 with an Allow header when the path exists for other
+// methods, or 404 otherwise.
+func (r *Router[T]) serveUnmatched(w http.ResponseWriter, req *http.Request) {
 	chain := make([]HandlerFunc[T], len(r.middlewares)+1)
 	copy(chain, r.middlewares)
 	chain[len(r.middlewares)] = func(c *Context[T]) {
-		r.mux.ServeHTTP(c.Res(), c.Req())
+		if allow := r.allowedMethods(c.Req()); len(allow) > 0 {
+			c.Res().Header().Set("Allow", strings.Join(allow, ", "))
+			http.Error(c.Res(), http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		http.NotFound(c.Res(), c.Req())
 	}
-
 	r.serve(w, req, chain, nil)
+}
+
+// allowedMethods returns the methods that have a route for the request path.
+func (r *Router[T]) allowedMethods(req *http.Request) []string {
+	var allow []string
+	probe := *req
+	for _, m := range routeMethods {
+		probe.Method = m
+		if _, pattern := r.mux.Handler(&probe); pattern != fallbackPattern && pattern != "" {
+			allow = append(allow, m)
+		}
+	}
+	return allow
 }
 
 func (r *Router[T]) serve(w http.ResponseWriter, req *http.Request, chain []HandlerFunc[T], deadline *deadlineCtx) {
@@ -101,7 +130,7 @@ func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
 
 // newRouter creates the root Router for an application.
 func newRouter[T any](conf *Config[T]) *Router[T] {
-	return &Router[T]{
+	r := &Router[T]{
 		mux:         http.NewServeMux(),
 		prefix:      "",
 		json:        conf.JSON,
@@ -119,6 +148,8 @@ func newRouter[T any](conf *Config[T]) *Router[T] {
 		timeout:      conf.Timeout,
 		maxBodyBytes: conf.MaxBodyBytes,
 	}
+	r.mux.HandleFunc(fallbackPattern, r.serveUnmatched)
+	return r
 }
 
 func registerHelper[T any](r *Router[T], method, path string, finalHandler HandlerFunc[T]) {
@@ -137,7 +168,7 @@ func registerHelper[T any](r *Router[T], method, path string, finalHandler Handl
 			req = req.WithContext(deadline)
 		}
 
-		if r.maxBodyBytes > 0 {
+		if r.maxBodyBytes > 0 && req.Body != nil && req.Body != http.NoBody {
 			req.Body = http.MaxBytesReader(w, req.Body, r.maxBodyBytes)
 		}
 
