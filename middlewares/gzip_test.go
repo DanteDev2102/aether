@@ -64,3 +64,19 @@ func TestGzipMiddleware_NoBodyStatus(t *testing.T) {
 		t.Errorf("expected empty, unencoded 204; got encoding %q and %d bytes", w.Header().Get("Content-Encoding"), w.Body.Len())
 	}
 }
+
+func TestGzipMiddleware_CompressesStringResponses(t *testing.T) {
+	r := newTestRouter(GzipMiddleware[testGlobal]())
+	aether.Get(r, "/s", func(c *testCtx) { _ = c.String(http.StatusOK, "plain text body") })
+
+	w := do(r, http.MethodGet, "/s", nil, map[string]string{"Accept-Encoding": "gzip"})
+
+	zr, err := gzip.NewReader(w.Body)
+	if err != nil {
+		t.Fatalf("expected a gzip body (WriteString must not bypass compression): %v", err)
+	}
+	got, _ := io.ReadAll(zr)
+	if string(got) != "plain text body" {
+		t.Errorf("unexpected decompressed body %q", got)
+	}
+}
