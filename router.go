@@ -18,7 +18,7 @@ type Router[T any] struct {
 	cache        CacheStore
 	log          Logger
 	middlewares  []HandlerFunc[T]
-	ctxPool      sync.Pool
+	ctxPool      *sync.Pool
 	global       T
 	timeout      int
 	maxBodyBytes int64
@@ -47,7 +47,7 @@ func NewGroup[T any](prefix string, router *Router[T]) *Router[T] {
 		cache:        router.cache,
 		log:          router.log,
 		middlewares:  m,
-		ctxPool:      sync.Pool{},
+		ctxPool:      router.ctxPool,
 		global:       router.global,
 		timeout:      router.timeout,
 		maxBodyBytes: router.maxBodyBytes,
@@ -65,7 +65,7 @@ func NewRouter[T any](jsonEngine JSONEngine, xmlEngine XMLEngine, templateEngine
 		cache:       cacheStore,
 		log:         log,
 		middlewares: make([]HandlerFunc[T], 0),
-		ctxPool: sync.Pool{
+		ctxPool: &sync.Pool{
 			New: func() any {
 				return &Context[T]{}
 			},

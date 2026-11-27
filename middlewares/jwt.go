@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/DanteDev2102/aether"
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/DanteDev2102/aether"
 )
 
 type contextKey string

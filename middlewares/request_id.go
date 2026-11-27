@@ -3,8 +3,9 @@ package middlewares
 import (
 	"context"
 
-	"github.com/DanteDev2102/aether"
 	"github.com/google/uuid"
+
+	"github.com/DanteDev2102/aether"
 )
 
 const requestIDKey contextKey = "RequestID"
