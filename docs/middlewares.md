@@ -57,7 +57,7 @@ r.Use(middlewares.HelmetMiddleware[T](middlewares.DefaultHelmetConfig()))
 
 // Or customize:
 r.Use(middlewares.HelmetMiddleware[T](middlewares.HelmetConfig{
-    XSSProtection:         "1; mode=block",
+    XSSProtection:         "0", // legacy header; rely on CSP
     ContentTypeNosniff:    "nosniff",
     XFrameOptions:         "DENY",
     HSTSMaxAge:            31536000,
@@ -72,7 +72,7 @@ r.Use(middlewares.RateLimiterMiddleware[T](middlewares.RateLimiterConfig{
     Limit:        100,                    // Max requests per window
     Window:       time.Minute,            // Time window
     Store:        customStore,            // Custom store (optional)
-    TrustProxies: []string{"10.0.0.1"},   // Trusted proxy IPs
+    TrustProxies: []string{"10.0.0.0/8"}, // Trusted proxy IPs or CIDRs
     SkipFunc: func(req *http.Request) bool {
         return req.URL.Path == "/health"  // Skip rate limiting
     },
@@ -151,7 +151,11 @@ r.Use(middlewares.CSRFMiddleware[T](middlewares.CSRFConfig{
 ### Request ID
 ```go
 r.Use(middlewares.RequestIDMiddleware[T]())
-// Adds X-Request-Id header to every response
+// Adds X-Request-Id header to every response. A valid incoming ID
+// (max 128 chars of letters, digits and "-_.:") is reused.
+
+// Read it in a handler:
+rid := middlewares.GetRequestID(c)
 ```
 
 ### Gzip Compression

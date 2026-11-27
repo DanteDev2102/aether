@@ -18,9 +18,13 @@ type HelmetConfig struct {
 }
 
 // DefaultHelmetConfig returns the default security headers configuration.
+// X-XSS-Protection is set to "0" because the legacy browser XSS auditor it
+// controls is removed from modern browsers and could itself be abused; use
+// ContentSecurityPolicy instead.
 func DefaultHelmetConfig() HelmetConfig {
 	return HelmetConfig{
-		XSSProtection:         "1; mode=block",
+		XSSProtection:         "0",
+		ReferrerPolicy:        "strict-origin-when-cross-origin",
 		ContentTypeNosniff:    "nosniff",
 		XFrameOptions:         "SAMEORIGIN",
 		HSTSMaxAge:            31536000,
